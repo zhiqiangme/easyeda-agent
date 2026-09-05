@@ -10,6 +10,13 @@ part — so the BOM is manufacturable without surprise feeder fees or stockouts.
 命中后块的 `parts` map 直接给出 `standard-parts.json` 的 role,**选型这步免做**;只有块里没有、或板级
 专有件才走下面的比对选型/排名流程。
 
+## 数据手册优先
+
+标准器件条目应同时保存 `datasheetUrl`（立创型号页）和可直接读取的
+`datasheetPdfUrl`。确定外围电路、引脚功能、典型应用、去耦值和布局约束时，先读取对应
+数据手册；块库中的 `source`/`note` 只作为已验证摘要，不能替代型号手册。若页面型号、
+PDF 或封装与当前库器件不一致，停止自动绘图并重新核对器件身份。
+
 ## Data sources (live, no API key, browser User-Agent)
 
 | Source | Endpoint | Gives |

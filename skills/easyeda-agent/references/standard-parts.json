@@ -66,6 +66,8 @@
       "value": "AMS1117-3.3",
       "mpn": "AMS1117-3.3",
       "lcsc": "C6186",
+      "datasheetUrl": "https://item.szlcsc.com/datasheet/AMS1117-3.3/6652.html",
+      "datasheetPdfUrl": "https://atta.szlcsc.com/upload/public/pdf/source/20180727/C6186_7A095716F0823C02F1997A905E26C086.pdf",
       "manufacturer": "AMS",
       "deviceUuid": "9f9c6cb41c7449fd8acf96aceed2661a",
       "footprint": "SOT-223-3",
