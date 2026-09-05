@@ -50,3 +50,21 @@ func TestSnapshotPreservesPlacementOrientation(t *testing.T) {
 		t.Fatalf("orientation was not preserved: %#v", d.Components[0].Placement)
 	}
 }
+
+func TestNetClassificationForMaterialization(t *testing.T) {
+	tests := []struct {
+		name, scope, role string
+	}{
+		{"+3V3", "global", "power"},
+		{"VCC_USB", "global", "power"},
+		{"GND", "global", "ground"},
+		{"PGND", "global", "ground"},
+		{"UART_TX", "local", "signal"},
+	}
+	for _, tc := range tests {
+		scope, role := classifyNet(tc.name)
+		if scope != tc.scope || role != tc.role {
+			t.Errorf("classifyNet(%q) = (%q,%q), want (%q,%q)", tc.name, scope, role, tc.scope, tc.role)
+		}
+	}
+}

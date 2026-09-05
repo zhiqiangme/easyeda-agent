@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // FromRead converts the active-page semantic read. It rejects shallow data.
@@ -100,7 +101,8 @@ func FromRead(m map[string]any) (Document, error) {
 		d.Components = append(d.Components, c)
 	}
 	for name, id := range nets {
-		d.Nets = append(d.Nets, Net{ID: id, Name: name})
+		scope, role := classifyNet(name)
+		d.Nets = append(d.Nets, Net{ID: id, Name: name, Scope: scope, Role: role})
 	}
 	sort.Slice(d.Components, func(i, j int) bool { return d.Components[i].ID < d.Components[j].ID })
 	sort.Slice(d.Nets, func(i, j int) bool { return d.Nets[i].ID < d.Nets[j].ID })
@@ -112,6 +114,26 @@ func FromRead(m map[string]any) (Document, error) {
 		return a.PinNumber < b.PinNumber
 	})
 	return d, d.Validate()
+}
+
+// classifyNet keeps the connectivity IR useful to layout/materialization code
+// without making geometry part of the electrical truth.  Power and ground are
+// global semantic rails: they may be represented by repeated local symbols.
+// Everything else is a local signal until a module/page boundary promotes it
+// to a port or label during materialization.
+func classifyNet(name string) (scope, role string) {
+	n := strings.ToUpper(strings.TrimSpace(name))
+	if n == "GND" || n == "AGND" || n == "DGND" || n == "PGND" || strings.HasSuffix(n, "_GND") {
+		return "global", "ground"
+	}
+	if n == "VCC" || n == "VBUS" || n == "VDD" || n == "VSS" || n == "3V3" || n == "5V" || n == "12V" || n == "1V8" ||
+		strings.HasPrefix(n, "+") || strings.HasPrefix(n, "VDD_") ||
+		strings.HasPrefix(n, "VCC_") || strings.HasPrefix(n, "VBAT") ||
+		strings.HasSuffix(n, "_VCC") || strings.HasSuffix(n, "_VDD") ||
+		strings.HasSuffix(n, "_3V3") || strings.HasSuffix(n, "_5V") {
+		return "global", "power"
+	}
+	return "local", "signal"
 }
 
 func numberValue(v any) (float64, bool) {

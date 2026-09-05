@@ -393,6 +393,24 @@ EasyEDA's DRC does **not** treat two primitives sharing the same coordinate as e
 
 Apply this rule when generating any power/ground/port connection — emit the wire first, then place the flag at the wire's free endpoint.
 
+### 1.4 电源与外围电路的物化策略
+
+原理图快照的 `pin_net` 是唯一电气事实，导线和标志是 Apply 阶段的派生图面。对每个
+网络先按模块收集 terminal，再按下面的固定优先级生成图面：
+
+1. 同一模块内、距离较近的外围引脚先用一条正交真实 wire 连接（例如 AMS1117 的
+   VIN/VOUT 与输入/输出电容），避免把本来连续的外围电路拆成一组同名标签。
+2. `GND`、`VCC`、`+3V3`、`+5V` 等全局网允许在多个 terminal 就近放置同名 power/
+   ground flag。只有被短 wire 森林覆盖的局部连接不再重复放旗；不要用一根跨页或环绕
+   整页的母线代替这些局部符号。
+3. 普通信号在模块内优先直连；跨模块/跨页/长距离才使用 netport 或 netlabel。规划器
+   以“拓扑正确、无短路、少 wire 数、少总长度、少拐点”为顺序优化目标，禁止闭环和
+   穿 pin 的路径。
+
+因此，电源符号可以多放，但每个 flag 仍必须有真实非零短桩；导线越少越好不等于删除
+必要的 pin→外围器件连接。完成 Apply 后必须用 `sch read`、`sch check`、
+`sch bridge-check` 和 DRC 对账，任何拓扑变化都停止队列。
+
 ## Missing Actions
 
 When a needed operation has no typed action:
