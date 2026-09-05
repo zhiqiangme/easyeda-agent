@@ -174,6 +174,25 @@ easyeda sch autolayout --spec p1-layout.json --json
 easyeda sch autolayout --engine official --apply
 ```
 
+### 电源模块的 XY 规划（1.4）
+
+电源页不能套用“无源件只挂电源网就跳过去”的通用评分。规划器先消费快照中的
+`pin_net` 和真实 pin 坐标，再输出位置，最后才物化导线：
+
+1. 选模块核心（LDO/DC-DC）为锚点，沿电流方向建立单轴：`VIN → 核心 → VOUT`。
+   输入端子和 `C_IN` 放在核心左侧，`C_OUT/C_BYP` 放在右侧；同一输出网络的多个
+   电容按近端距离从上到下排列，避免交叉。
+2. 对每个器件枚举 4 个朝向，代价函数依次考虑：引脚到目标的曼哈顿距离、方向反转、
+   线段数量、折点数量、穿越其它 pin、与文字/图签重叠。固定优先级是电气拓扑、
+   无交叉、方向一致、少线、短线、版面紧凑。
+3. 电源 pin 的外引方向固定为 up，GND 固定为 down；普通外围件的 pin1→目标网络
+   方向与主轴一致。若两个候选同分，用左上到右下的 Z 顺序稳定打破平局。
+4. 位置确定后，对每个 net 生成正交最小森林；局部 VOUT→电容必须是真实 wire，
+   全局 GND/VCC 才允许在各 terminal 使用就近符号。任何线树合并多个网络立即拒绝。
+
+因此，布局算法的输入是器件/引脚/网络数据，输出是可复现的 XY、rotation、wire
+points 和 flag direction；历史导线和截图都不参与规划。
+
 Template `--apply` is deliberately **pre-wiring only**. It moves symbols via
 `schematic.component.modify`, which does not carry attached wires or flags with
 the symbol. The command resolves one immutable target page from `--doc` or
