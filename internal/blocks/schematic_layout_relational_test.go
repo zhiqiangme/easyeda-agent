@@ -207,3 +207,30 @@ func TestRelationalLayout_EmptyTemplateIsAnError(t *testing.T) {
 		t.Errorf("空模板必须报错: %v", got)
 	}
 }
+
+// AMS1117 is a regression corpus entry for the data-driven power layout.  Keep
+// both VOUT pads represented by separate attach targets so the solver can place
+// the bulk and high-frequency capacitors from measured pin geometry instead of
+// guessing a single output coordinate.
+func TestPowerLayoutTrainingCorpus_AMS1117(t *testing.T) {
+	blk, ok, err := Get("block.ams1117_ldo_3v3")
+	if err != nil || !ok {
+		t.Fatalf("load AMS1117 block: ok=%v err=%v", ok, err)
+	}
+	layout, err := blk.SchematicLayout()
+	if err != nil || layout == nil {
+		t.Fatalf("read AMS1117 schematic layout: %v", err)
+	}
+	if layout.Attach["C_OUT"] != "U.4" || layout.Attach["C_BYP"] != "U.2" {
+		t.Fatalf("VOUT fanout training targets lost: %+v", layout.Attach)
+	}
+	if layout.Orient["C_IN"] != "horizontal" || layout.Orient["C_OUT"] != "horizontal" || layout.Orient["C_BYP"] != "horizontal" {
+		t.Fatalf("power capacitor orientation intent lost: %+v", layout.Orient)
+	}
+	var issues []string
+	_ = layout // validateSchematicLayout reads the block's embedded layout
+	validateSchematicLayout(blk, func(field, msg string) { issues = append(issues, field+": "+msg) })
+	if len(issues) != 0 {
+		t.Fatalf("AMS1117 training fixture should validate: %v", issues)
+	}
+}

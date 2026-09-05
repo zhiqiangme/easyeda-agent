@@ -81,8 +81,13 @@
     "anchor": "U",
     "attach": {
       "C_IN": "U.VIN",
-      "C_OUT": "U.2",
+      "C_OUT": "U.4",
       "C_BYP": "U.2"
+    },
+    "orient": {
+      "C_IN": "horizontal",
+      "C_OUT": "horizontal",
+      "C_BYP": "horizontal"
     }
   },
   "schematic_notes": [
