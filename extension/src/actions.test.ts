@@ -357,6 +357,67 @@ test('components.list: connectivitySummary stays scoped to active page with allP
 	}
 });
 
+test('components.list: complete page inventory loads unvisited pages and rejects incomplete evidence', async (t) => {
+	for (const failure of ['none', 'enumerate', 'open', 'read', 'restore']) {
+		await t.test(failure, async () => {
+			let active = 'page-1';
+			let visitedOther = false;
+			let globalReads = 0;
+			let restores = 0;
+			const loaded = new Set(['page-1']);
+			const parts = new Map([
+				['page-1', mockComponent({ PrimitiveId: 'p1', ComponentType: 'part', Designator: 'U1' })],
+				['page-2', mockComponent({ PrimitiveId: 'p2', ComponentType: 'part', Designator: 'U2' })],
+			]);
+			(globalThis as any).eda = {
+				dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: active }) },
+				dmt_Schematic: { getAllSchematicPagesInfo: async () => {
+					if (failure === 'enumerate') throw new Error('cannot enumerate');
+					return [{ uuid: 'page-1', name: 'P1' }, { uuid: 'page-2', name: 'P2' }];
+				} },
+				dmt_EditorControl: { openDocument: async (uuid: string) => {
+					if (uuid === 'page-2') {
+						visitedOther = true;
+						if (failure === 'open') throw new Error('cannot open page-2');
+					}
+					if (uuid === 'page-1' && visitedOther) {
+						restores++;
+						if (failure === 'restore') throw new Error('cannot restore page-1');
+					}
+					active = uuid;
+					loaded.add(uuid);
+				} },
+				sch_PrimitiveComponent: { getAll: async (_filter?: unknown, allPages?: boolean) => {
+					if (allPages) {
+						globalReads++;
+						return [...loaded].map(id => parts.get(id));
+					}
+					if (active === 'page-2' && failure === 'read') return undefined;
+					return [parts.get(active)];
+				} },
+			};
+			try {
+				if (failure === 'none') {
+					const res: any = await schematicComponentsList({ allPages: true, tagPages: true });
+					assert.deepEqual(res.result.components.map((c: any) => [c.designator, c.pageUuid]), [['U1', 'page-1'], ['U2', 'page-2']]);
+					assert.equal(globalReads, 1);
+				}
+				else {
+					await assert.rejects(() => schematicComponentsList({ allPages: true, tagPages: true }), (err: any) => {
+						assert.equal(err.code, 'EDA_CALL_FAILED');
+						assert.match(err.message, /Full-project component inventory is incomplete/);
+						return true;
+					});
+					assert.equal(globalReads, 0, 'must not serialize a partial inventory as successful');
+				}
+				if (visitedOther) assert.equal(restores, 1, 'always attempt to restore the original page');
+				if (failure !== 'restore') assert.equal(active, 'page-1');
+			}
+			finally { delete (globalThis as any).eda; }
+		});
+	}
+});
+
 test('components.list: includePins distinguishes empty success, unavailable data, and failure', async () => {
 	const components = [
 		mockComponent({ PrimitiveId: 'pins-empty', ComponentType: 'part', Designator: 'U1' }),

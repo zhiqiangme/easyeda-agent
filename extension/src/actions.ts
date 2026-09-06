@@ -865,15 +865,17 @@ const schematicRename: Handler = async (payload) => {
 // tagComponentPages attributes each component to its owning schematic page by
 // visiting every page in turn (the EDA API exposes no per-component page accessor
 // and getAll only takes a boolean allPages flag). It restores the originally
-// active page before returning, so the caller's view is unchanged. Returns a
-// primitiveId → {pageUuid,pageName} map; on any failure it returns an empty map
-// (page tagging is best-effort — autoconnect degrades to a generic switch hint).
-async function tagComponentPages(): Promise<Map<string, { pageUuid: string; pageName: string }>> {
+// active page before returning. Whole-project inventories require complete
+// evidence; local page hints may remain best-effort.
+async function tagComponentPages(requireComplete = false): Promise<Map<string, { pageUuid: string; pageName: string }>> {
 	const byId = new Map<string, { pageUuid: string; pageName: string }>();
+	const failures: string[] = [];
 	let current: Awaited<ReturnType<typeof eda.dmt_SelectControl.getCurrentDocumentInfo>> | undefined;
 	try {
 		current = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+		if (requireComplete && !current?.uuid) throw new Error('original active page is unavailable');
 		const pages = await eda.dmt_Schematic.getAllSchematicPagesInfo();
+		if (requireComplete && (!Array.isArray(pages) || !pages.length)) throw new Error('schematic page inventory is unavailable or empty');
 		for (const page of pages) {
 			// Per-page isolation: one unloadable page must not abort the others —
 			// and, via the finally below, must never skip the foreground restore
@@ -881,21 +883,34 @@ async function tagComponentPages(): Promise<Map<string, { pageUuid: string; page
 			// schematic page foregrounded would land those writes wrong).
 			try {
 				await eda.dmt_EditorControl.openDocument(page.uuid);
+				if (requireComplete && (await eda.dmt_SelectControl.getCurrentDocumentInfo())?.uuid !== page.uuid) {
+					throw new Error('page did not become active');
+				}
 				// getAll() with no allPages flag returns only the ACTIVE page's parts.
-				for (const c of await eda.sch_PrimitiveComponent.getAll()) {
+				const parts = await eda.sch_PrimitiveComponent.getAll();
+				if (!Array.isArray(parts)) throw new Error('component inventory is unavailable');
+				for (const c of parts) {
 					byId.set(c.getState_PrimitiveId(), { pageUuid: page.uuid, pageName: page.name });
 				}
 			}
-			catch { /* skip this page, keep tagging the rest */ }
+			catch (err) { failures.push(`page ${page.uuid}: ${String(err)}`); }
 		}
 	}
-	catch { /* best-effort: leave the map as-is */ }
+	catch (err) { failures.push(String(err)); }
 	finally {
 		// Restore the page the caller was on — unconditionally.
 		try {
-			if (current?.uuid) await eda.dmt_EditorControl.openDocument(current.uuid);
+			if (current?.uuid) {
+				await eda.dmt_EditorControl.openDocument(current.uuid);
+				if (requireComplete && (await eda.dmt_SelectControl.getCurrentDocumentInfo())?.uuid !== current.uuid) {
+					throw new Error('original page did not become active');
+				}
+			}
 		}
-		catch { /* nothing left to do */ }
+		catch (err) { failures.push(`restore original page: ${String(err)}`); }
+	}
+	if (requireComplete && failures.length) {
+		throw edaError(new Error(failures.join('; ')), 'Full-project component inventory is incomplete.');
 	}
 	return byId;
 }
@@ -930,7 +945,7 @@ export const schematicComponentsList: Handler = async (payload) => {
 	const tagPages = optionalBoolean(payload, 'tagPages') === true;
 	// Tag pages BEFORE the main getAll so the active-page cycling doesn't disturb
 	// the component set we ultimately serialize.
-	const pageById = tagPages ? await tagComponentPages() : null;
+	const pageById = tagPages ? await tagComponentPages(allPages) : null;
 	let components;
 	try {
 		components = await eda.sch_PrimitiveComponent.getAll(undefined, allPages);
