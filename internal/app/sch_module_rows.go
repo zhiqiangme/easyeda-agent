@@ -44,9 +44,8 @@ func planSchModuleRows(frames []schFrameSpec, sheet layoutBBox, margin, gap floa
 			return nil, fmt.Errorf("module %s would exceed the single sheet in row %d; reduce input extents (no automatic pagination)", f.ID, row+1)
 		}
 		dx, dy := x-f.Rect.MinX, top-f.Rect.MaxY
+		f = translateSchFrame(f, dx, dy)
 		f.Rect = layoutBBox{MinX: x, MinY: top - height, MaxX: x + width, MaxY: top}
-		f.TitleX += dx
-		f.TitleY += dy
 		out = append(out, schModuleRowPlacement{Frame: f, Row: row, DX: dx, DY: dy})
 		x += width + gap
 	}
@@ -67,13 +66,25 @@ func translatePowerLayout(p *powerLayoutPlan, dx, dy float64) {
 		p.Flags[i].PinX += dx
 		p.Flags[i].PinY += dy
 	}
-	for i := range p.Frames {
-		f := &p.Frames[i]
-		f.Rect.MinX += dx
-		f.Rect.MaxX += dx
-		f.Rect.MinY += dy
-		f.Rect.MaxY += dy
-		f.TitleX += dx
-		f.TitleY += dy
+	for i, f := range p.Frames {
+		p.Frames[i] = translateSchFrame(f, dx, dy)
 	}
+}
+
+func translateSchFrame(f schFrameSpec, dx, dy float64) schFrameSpec {
+	shift := func(b layoutBBox) layoutBBox {
+		return layoutBBox{MinX: b.MinX + dx, MinY: b.MinY + dy, MaxX: b.MaxX + dx, MaxY: b.MaxY + dy}
+	}
+	f.Rect = shift(f.Rect)
+	f.TitleX += dx
+	f.TitleY += dy
+	if f.TitleLayout != nil {
+		l := *f.TitleLayout
+		l.Obstacles = make([]layoutBBox, len(f.TitleLayout.Obstacles))
+		for i, o := range f.TitleLayout.Obstacles {
+			l.Obstacles[i] = shift(o)
+		}
+		f.TitleLayout = &l
+	}
+	return f
 }

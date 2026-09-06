@@ -25,14 +25,51 @@ type schFrameDocument struct {
 }
 
 type schFrameSpec struct {
-	ID       string     `json:"id"`
-	Title    string     `json:"title"`
-	Rect     layoutBBox `json:"rect"`
-	TitleX   float64    `json:"titleX"`
-	TitleY   float64    `json:"titleY"`
-	FontSize float64    `json:"fontSize"`
-	Color    string     `json:"color"`
-	LineType int        `json:"lineType"`
+	ID          string               `json:"id"`
+	Title       string               `json:"title"`
+	Rect        layoutBBox           `json:"rect"`
+	TitleX      float64              `json:"titleX"`
+	TitleY      float64              `json:"titleY"`
+	FontSize    float64              `json:"fontSize"`
+	Color       string               `json:"color"`
+	LineType    int                  `json:"lineType"`
+	TitleLayout *schFrameTitleLayout `json:"titleLayout,omitempty"`
+}
+
+// The planner persists its reserved text envelope and occupied circuit bounds.
+// Native readback checks both: fitting inside the frame alone is insufficient.
+type schFrameTitleLayout struct {
+	Width     float64      `json:"width"`
+	Height    float64      `json:"height"`
+	Clearance float64      `json:"clearance"`
+	Obstacles []layoutBBox `json:"obstacles"`
+}
+
+func (f schFrameSpec) titleBounds() layoutBBox {
+	return layoutBBox{MinX: f.TitleX, MinY: f.TitleY - f.TitleLayout.Height, MaxX: f.TitleX + f.TitleLayout.Width, MaxY: f.TitleY}
+}
+
+func checkSchFrameTitleOccupancy(f schFrameSpec, b layoutBBox) error {
+	l := f.TitleLayout
+	if l == nil {
+		return nil
+	} // Older hand-authored frames have no occupancy model.
+	if !plFinite(l.Width) || !plFinite(l.Height) || !plFinite(l.Clearance) || l.Width <= 0 || l.Height < f.FontSize || l.Clearance < 0 || len(l.Obstacles) == 0 {
+		return fmt.Errorf("frame %s has invalid titleLayout dimensions/clearance/obstacles", f.ID)
+	}
+	reserved := f.titleBounds()
+	if !boxInside(reserved, f.Rect) || !boxInside(b, reserved) {
+		return fmt.Errorf("frame %s title exceeds its planned envelope; refresh titleMetrics and replan", f.ID)
+	}
+	for i, o := range l.Obstacles {
+		if !plBoxValid(o) || !boxInside(o, f.Rect) {
+			return fmt.Errorf("frame %s obstacle %d invalid/outside frame", f.ID, i)
+		}
+		if b.MinX < o.MaxX+l.Clearance-1e-6 && b.MaxX > o.MinX-l.Clearance+1e-6 && b.MinY < o.MaxY+l.Clearance-1e-6 && b.MaxY > o.MinY-l.Clearance+1e-6 {
+			return fmt.Errorf("frame %s title overlaps circuit clearance at obstacle %d", f.ID, i)
+		}
+	}
+	return nil
 }
 
 func (f schFrameSpec) hash() string {
@@ -65,6 +102,11 @@ func (p schFrameDocument) validate() error {
 		}
 		if !schFrameColorRE.MatchString(f.Color) || f.LineType != 1 {
 			return fmt.Errorf("frame %s needs a #RRGGBB color and dashed lineType:1", f.ID)
+		}
+		if f.TitleLayout != nil {
+			if err := checkSchFrameTitleOccupancy(f, f.titleBounds()); err != nil {
+				return err
+			}
 		}
 		// LEFT_TOP anchor, y-UP. Width is also checked after creation against
 		// the native text bbox; this validation rejects impossible vertical data.
@@ -114,7 +156,9 @@ func newSchFrameCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *c
 has id, title, rect:{minX,minY,maxX,maxY}, titleX, titleY, fontSize, color and
 lineType:1 (dashed). Coordinates are y-UP raw units (0.01 inch). titleX/titleY
 are the LEFT_TOP text anchor. A 0.2 inch title uses fontSize:20; the project
-color is #AA00AA. Only primitives recorded for this page and frame id are
+color is #AA00AA. Optional titleLayout:{width,height,clearance,obstacles:[bbox]}
+verifies the native title against its planned envelope and occupied circuit bounds.
+Only primitives recorded for this page and frame id are
 replaced. Existing user graphics and zone-draw frames remain independently owned.
 Unknown write outcomes stop and retain a recovery receipt rather than retrying.`,
 			Args: cobra.NoArgs,

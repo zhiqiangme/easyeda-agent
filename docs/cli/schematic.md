@@ -36,8 +36,8 @@ typed CLI 操作嘉立创EDA专业版的原理图——每个动作可观测、�
 
 | 能力 | 命令 | 说明 |
 |---|---|---|
-| 固定 LDO 数据规划 | `sch power-layout --from ... --out ... --playbook ...` | 实测几何→器件/引脚/线/电源符号/模块框;默认左上起排,共享 Z 字行布局使用统一行高;`--frames-only` 只验证并补框 |
-| 模块呈现转换 | `sch frame apply/check --from ...` | JSON→粉色虚线框+0.2 inch 标题;按页面和模块记录 ID,完整样式与渲染边界回读,重复 Apply 不增图元 |
+| 固定 LDO 数据规划 | `sch power-layout --from ... --out ... --playbook ...` | 实测几何→器件/引脚/线/电源符号/模块框;标题择上下空档压缩包络后,默认左上 Z 字起排、统一行高;输入可带实测 `titleMetrics`;`--frames-only` 只验证并补框 |
+| 模块呈现转换 | `sch frame apply/check --from ...` | JSON→粉色虚线框+0.2 inch 标题;按页面和模块记录 ID,回读样式/实际文字边界;可选 `titleLayout` 核验预测包络和障碍物净距,重复 Apply 不增图元 |
 | 模块感知自动布局 | `sch autolayout` | 双引擎:`template`(spec 驱动,核心放分区中心+外围环绕,确定性,布线前用)/ `official`(平台 @beta 兜底,破坏性,`--rewire` 网表重建) |
 | 空隙打包 | `sch autoplace-free` | 无分区场景往空白处塞件 |
 | 对齐/等距 | `sch align` / `sch distribute` | 按渲染 bbox 对齐(left/right/top/…)/ 单轴等距摊开;默认 dry-run;选集**部分覆盖**持久组时硬拒绝(`--break-group` 显式放行) |
@@ -149,4 +149,4 @@ connect/autoconnect 只有端点挂 netflag/netport 一种表达;同模块内「
 *本文与 [`docs/FEATURES.md`](./FEATURES.md)(全域 action 清单+roadmap)互补:那边是动作粒度,
 这边是「AI 操作原理图」的功能域视角。改动原理图相关命令后请同步本文。*
 
-1.4 不再提供独立 `sch note` 命令,也不以 Notes 的存在或归属阻塞检查。模块框标题由呈现数据转换生成,粉色字高 0.2 inch(20单位),方框使用虚线。普通文字读取仍使用 `sch text-list`。
+1.4 不再提供独立 `sch note` 命令,也不以 Notes 的存在或归属阻塞检查。模块框标题由呈现数据转换生成,粉色字高 0.2 inch(20单位),方框使用虚线。标题放在上方或下方的合法空档,不固定保留顶部标题带。数据字段与转换验收见[模块框与标题](../schematic-frame-conversion.md)。普通文字读取仍使用 `sch text-list`。

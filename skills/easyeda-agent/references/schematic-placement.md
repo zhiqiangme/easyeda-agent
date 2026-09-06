@@ -77,8 +77,8 @@ pin,**先按移动前实测的桩方向/长度原样重建**(刚体平移的语�
   autoconnect 重连)。
 - **组间 hGap 默认 117** = 两个相向水平 netport 标签实测最小距;压到 40 省空间的
   代价是 `marker-overlap` 一片(实测 3 处)。
-- **区间 vGap 默认 90** = 两框 pad(24×2)+ 标题带(30)+ 缝(12)——区内容间距
-  决定框间距,小于 78 相邻行的分区框必然相叠。
+- **旧 zone solver 的区间 vGap 默认 90** = 两框 pad(24×2)+ 标题带(30)+ 缝(12)。
+  这是存量分区工具的间距,不用于 1.4 frame 的紧凑标题规划。
 - **方位词**支持跨两列:`left-center` / `center-right` / `any`(超高主控锚+侧排
   外围的宽区,1/3 网格词罩不住)。方位词现在只影响 `sch autolayout` 的**落位目标格**
   —— 分区框的几何一律由活体模块 bbox 反推,与方位词无关。
@@ -87,7 +87,11 @@ pin,**先按移动前实测的桩方向/长度原样重建**(刚体平移的语�
   新 frame 路径不生成说明或预留 Notes 带。旧 zone solver 保留已有文字的说明带几何,以兼容存量布局。
   `sch frame apply/check --from plan.json` 转换并核验 `frames` 数据;也支持 `--data` 嵌入 Apply。
   POWER 的框由 `sch power-layout` 计算,`--frames-only --playbook` 可只补框验证,不移动器件或导线。
-  新布局默认从纸张左上角按功能顺序向右排,行满再换行;所有行统一采用最大模块高度,
+  标题按器件/标注/引脚/每段导线/电源符号与引线的占位寻找上、下空档;先比较框高度,
+  再比较面积,平局依次优先左对齐、顶部。容得下就内嵌,不够才最小扩边,不固定留顶部标题带。
+  快照可带 `titleMetrics` 实测文字宽高;无实测时使用保守字符宽度估算。输出 `titleLayout`
+  保存预测包络及障碍物,Apply/check 用实际文字 bbox 检查越界和净距;不能把估算当作实测通过。
+  先压缩模块包络,再默认从纸张左上角按功能顺序向右排,行满再换行;所有行统一采用最大模块高度,
   同行框上下对齐。位移作用于模块全部器件/引脚/线/标记;`--at` 为显式核心位置例外。
   `--frames-only` 保留已有位置。生成队列必须完整执行,失败后回读并重生成,不能跳过校验。
   字段契约见 [`schematic-frame-conversion.md`](../../../docs/schematic-frame-conversion.md)。
@@ -434,12 +438,10 @@ validatePartitions(同一把尺)→ 三态 verdict:
 区框口径 = 成员 L1 虚拟组**全图元并集**(标签必在框内)。导线读不到会直接报错
 (端子归属靠导线,距离启发式必错)。
 
-> **外框只有一个函数(2026-08-20 用户裁定)**:`frame = f(成员 L1 虚拟组全图元并集,
-> 区名带, 说明带)`。`zone-plan` 的框、`zone-arrange` phase A 的现状框与收敛后框
-> 走的是**同一个函数本体**。带高由**已登记说明的内容 + 字号**推导(不是常量、更
-> 不读 note 的落点坐标)—— 所以 **phase A 收紧时 title/note 就已经在账里**,不再是
-> 「按常量带收紧 → 画框 → 再放 note 装不下 → 说明探出框外」。改任一侧,
-> `TestRuler_ZoneFrameSingleFunction` 会红。
+> **旧 zone 工具共享框函数**:`zone-plan` 与 `zone-arrange` 使用同一函数合并成员
+> L1 全图元、区名带及存量说明带;已有说明按内容和字号计入,由
+> `TestRuler_ZoneFrameSingleFunction` 保护。1.4 新 `frame` 路径使用上/下空档规划,
+> 不继承固定标题带,也不生成 Notes。
 
 > **分区归属也只有一个答案(2026-08-20 定案):一个虚拟组 / zone 认领 = 一个分区。**
 > `zone-arrange` 一直是这么算的(phase B 每个区一个落位框,断言③ 逐区量实测框、
@@ -518,7 +520,10 @@ pin 与偏差量(`pin4 方向 right→up、桩长 84→20`),那是计划/映射�
 `zone-arrange --apply`(两遍法,落地实测反哺规划),手写 exec 挪件是最后手段
 (且必须 5 的倍数坐标 —— 件是格点公民,脱格 connect_pin 全灭)。
 
-### Functional frames + text labels (multi-page safe)
+### Legacy zone frames + text labels (multi-page safe)
+
+This section covers the existing `zone-plan` / `zone-draw` workflow. New 1.4
+layout JSON uses `sch frame apply/check` and the compact title rules above.
 
 `easyeda sch zones set --spec <spec.json>` persists `modules[].zone/parts/page`
 by resolved schematic **document UUID**. Then draw one page at a time:

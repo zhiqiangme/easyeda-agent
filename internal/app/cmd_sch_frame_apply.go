@@ -124,6 +124,9 @@ func matchSchFrameText(f schFrameSpec, m map[string]any) error {
 	if !plBoxValid(b) || !boxInside(b, f.Rect) {
 		return fmt.Errorf("rendered title outside module frame: %+v", b)
 	}
+	if err := checkSchFrameTitleOccupancy(f, b); err != nil {
+		return err
+	}
 	// EasyEDA 3.2.186 stores alignMode=2 after requesting LEFT_TOP=1, yet
 	// renders with exactly the requested top-left boundary. Verify the visual
 	// coordinate contract, not that unreliable enum echo.

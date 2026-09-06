@@ -129,3 +129,45 @@ func TestRequireFullExecutionCannotSkipOrRetarget(t *testing.T) {
 		}
 	}
 }
+
+func TestSchFrameAdapterValidatesPlannedTitleOccupancy(t *testing.T) {
+	f, r, s := schFrameFixture()
+	f.TitleLayout = &schFrameTitleLayout{Width: 75, Height: 20, Clearance: 5, Obstacles: []layoutBBox{{110, 200, 200, 250}}}
+	p := schFrameDocument{SchemaVersion: 1, DocumentID: "doc", Frames: []schFrameSpec{f}}
+	raw, _ := json.Marshal(p)
+	if _, err := parseSchFrameDocument(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := matchSchFrame(f, r, s); err != nil {
+		t.Fatal(err)
+	}
+	s.Texts["text"]["bbox"].(map[string]any)["maxX"] = 186.0
+	if err := matchSchFrame(f, r, s); err == nil {
+		t.Fatal("adapter accepted native title outside its reserved envelope")
+	}
+	f.TitleLayout.Obstacles = append(f.TitleLayout.Obstacles, layoutBBox{120, 275, 160, 280})
+	raw, _ = json.Marshal(p)
+	if _, err := parseSchFrameDocument(raw); err == nil {
+		t.Fatal("colliding title data must fail before an API call")
+	}
+}
+
+func TestPowerLayoutConsumesSavedTitleMetrics(t *testing.T) {
+	fixture := powerLayoutFixture(t, 0, 0, 20, 0)
+	fixture["titleMetrics"] = map[string]any{"title": "POWER / AMS1117-3.3", "fontSize": 20, "width": 189.022171, "height": 20}
+	plan, err := planPowerLayout(powerLayoutBytes(t, fixture), powerLayoutTestOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Frames[0].TitleLayout.Width != 190 {
+		t.Fatal("snapshot native title measurement was ignored")
+	}
+	raw, _ := json.Marshal(plan)
+	if _, err := parseSchFrameDocument(raw); err != nil {
+		t.Fatal(err)
+	}
+	fixture["titleMetrics"].(map[string]any)["title"] = "different title"
+	if _, err := planPowerLayout(powerLayoutBytes(t, fixture), powerLayoutTestOptions()); err == nil {
+		t.Fatal("mismatched title measurement accepted")
+	}
+}

@@ -20,7 +20,7 @@ func TestModuleFrameGeometryCorpus(t *testing.T) {
 			}
 			f := plan.Frames[0]
 			content := powerLayoutContentBounds(plan)
-			if !boxInside(content, f.Rect) || f.TitleY-f.FontSize <= content.MaxY {
+			if !boxInside(content, f.Rect) || checkSchFrameTitleOccupancy(f, f.titleBounds()) != nil {
 				t.Fatalf("frame/title cuts into the content: %+v, %+v", f, content)
 			}
 			if f.FontSize != .2/.01 || f.Color != "#AA00AA" || f.LineType != 1 {
@@ -58,7 +58,7 @@ func TestModuleFrameGenericAndInvalidInput(t *testing.T) {
 	}
 	for _, box := range []layoutBBox{
 		{MinX: 0, MinY: 10, MaxX: 100, MaxY: 100},
-		{MinX: 100, MinY: 100, MaxX: 300, MaxY: 810},
+		{MinX: 100, MinY: 100, MaxX: 300, MaxY: 820},
 		{MinX: math.NaN(), MinY: 100, MaxX: 300, MaxY: 200},
 	} {
 		if _, err := planSchModuleFrame("USB", "USB", box, sheet); err == nil {

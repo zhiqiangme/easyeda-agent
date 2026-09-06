@@ -107,7 +107,10 @@ The calibrated core must have VIN on the left, pin 4 on the right, and GND
 below pin 2/VIN. No editor calls or mutations are performed. --out writes the
 layout plan; --playbook additionally writes the ordered sch apply operations
 with fresh geometry guards and post-apply pin/net verification. Each plan also
-contains a dashed pink module frame and a 0.2-inch title. --frames-only compiles
+contains a dashed pink module frame and a 0.2-inch title fitted into an upper or
+lower gap. Optional top-level titleMetrics:{title,fontSize,width,height} supplies
+a matching native text measurement; otherwise width is estimated and verified
+after Apply. --frames-only compiles
 only frame/title conversion and verification; all planned pins and parts must
 already be in their target positions and on their expected nets.`,
 		Args: cobra.NoArgs,
@@ -212,7 +215,8 @@ func planPowerLayout(raw []byte, o powerLayoutOptions) (*powerLayoutPlan, error)
 		Context struct {
 			Doc string `json:"documentUuid"`
 		} `json:"context"`
-		DocumentID string `json:"documentId"`
+		DocumentID   string           `json:"documentId"`
+		TitleMetrics *schTitleMetrics `json:"titleMetrics"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return nil, err
@@ -396,7 +400,11 @@ func planPowerLayout(raw []byte, o powerLayoutOptions) (*powerLayoutPlan, error)
 			plan.ExpectedPinNets[c.Designator+"."+p.Number] = p.Net
 		}
 	}
-	frame, err := measureSchModuleFrame("POWER", "POWER / AMS1117-3.3", powerLayoutContentBounds(plan))
+	var frameSheet *layoutBBox
+	if o.At != nil || o.PreservePosition {
+		frameSheet = sheet
+	}
+	frame, err := measureSchModuleFrameObstacles("POWER", "POWER / AMS1117-3.3", powerLayoutContentObstacles(plan), env.TitleMetrics, frameSheet)
 	if err != nil {
 		return nil, err
 	}
