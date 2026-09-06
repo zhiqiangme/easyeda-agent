@@ -2,20 +2,20 @@
 
 Run `easyeda actions` for the authoritative machine-readable list.
 
-## Playbook 回放(`easyeda apply`)— 批量步骤的首选载体
+## Playbook 回放(`easyeda sch apply`)— 批量步骤的首选载体
 
 > **多步批量操作(>~5 步)不要再写 shell/python 胶水脚本**——写成 playbook JSON,
-> `easyeda apply` 按步执行,自带变量捕获、门禁、journal 断点续跑。
+> `easyeda sch apply` 按步执行,自带变量捕获、门禁、journal 断点续跑。
 > 完整格式与错误处理语义见 `docs/design-apply-playbook.md`(单一真源)。
 
 ```bash
-easyeda apply steps.json                    # 顺序执行(meta.project 定目标工程)
-easyeda apply steps.json --dry-run          # 预检 + 打印计划,不执行
-easyeda apply steps.json --project demo2    # CLI flag > 文件(同一份打到另一工程)
-easyeda apply steps.json --var LIB=<uuid>   # 变量复写(参数化)
-easyeda apply steps.json --resume           # 按 journal 跳过已完成步骤(恢复 captured 变量)
-easyeda apply steps.json --from 12 --to 30  # 区间执行
-easyeda apply steps.json --yes              # 放行确认门控(delete/clear/rip-up/import 类)
+easyeda sch apply steps.json                    # 顺序执行(meta.project 定目标工程)
+easyeda sch apply steps.json --dry-run          # 预检 + 打印计划,不执行
+easyeda sch apply steps.json --project demo2    # CLI flag > 文件(同一份打到另一工程)
+easyeda sch apply steps.json --var LIB=<uuid>   # 变量复写(参数化)
+easyeda sch apply steps.json --resume           # 按 journal 跳过已完成步骤(恢复 captured 变量)
+easyeda sch apply steps.json --from 12 --to 30  # 区间执行
+easyeda sch apply steps.json --yes              # 放行确认门控(delete/clear/rip-up/import 类)
 ```
 
 要点(实现与设计一致,已单测+真机验证):
@@ -75,7 +75,7 @@ rip-up/clear 等破坏性步骤——整册回放前先 `--dry-run` 看计划,�
 
 ## Inspect Schematic
 
-- `schematic.components.list` — 当前页（或全页）所有元件，可含 pins
+- `schematic.components.list` — 当前页（或全页）所有元件，可含 pins；connectivity 导出会带 `includeDeviceIdentity`，把 placed-instance 的 16 位 uuid 解析为可 replay 的 32 位器件库 uuid，无法唯一解析时返回 `deviceIdentityError` 并阻止 materialize。快照同时保留 `placement.rotation`/`placement.mirror`；materialize 只把这两个 authored orientation 字段传给 `schematic.component.place`，bbox 仍是回读几何证据，不作为写入坐标。1.4 快照中的 net 还会标注 `scope/role`：电源和地为 `global/power|ground`，普通信号为 `local/signal`，供 Apply 选择“外围短线直连”或“局部同名电源符号”。
 - `schematic.select` — 按 primitiveId 选中图元
 - `schematic.export.image` — **看局部原理图的首选**（#166）。把当前页、或**只把指定图元**渲染成 **SVG / PNG / PDF**：`easyeda sch export-image --ids id1,id2 --out block.svg`（省略 `--ids` 导整页；`--format` 默认 svg；`--scope selection|page|project`；`--page` 定位页）。给了 `--ids` 就自动选中并**把画布裁到选区**（实测 3 个器件 → 283×155，整页是 1191×846）。**比 `view region` + `snapshot` 可靠**：不走视口，所以不受「后台标签页不重绘 → 截回上一帧整页」的影响；SVG 还是矢量，放大看密集接线不糊。⚠️ 底层 `getExportDocumentFile` 的 `object` 字面量**官方类型定义是错的**，传错不报错、直接让 promise 永远悬着（编辑器卡在 1% 进度条）——真值已固化在 handler 里，**不要照 .d.ts "修正"**；handler 另有 30s 超时兜底。
 - ~~`schematic.snapshot`~~ — **已移除(2026-08-12)**:视口截图易 stale,原理图出图统一走 `sch export-image`(整页或 `--ids` 选区,渲染文档数据、无视口依赖)。**落盘绝对路径**在 `result.artifactPath`(所有产 artifact 的动作统一如此,含 pcb snapshot/BOM/网表导出),stderr 另有 `📎 artifact saved: <path>` 一行 —— 读图直接用这个路径
@@ -198,3 +198,31 @@ UUID 与 library UUID 均精确一致才报告成功。
 - `board.delete`（删除组合/板子，无 undo）
 - 生成的多步 mutation 计划
 - `debug.exec_js`（任何情况）
+
+### 1.4 Connectivity 快照边界
+
+快照转换只使用同一张 pin→net 表生成网络和连接，避免枚举顺序不同造成错网。
+`netId` 当前由网名确定性生成：重排不变，但改名会改变 ID，尚不是持久网络身份。
+无引脚的浅数据拒绝导出；多页必须逐页激活读取，不能把空 pins 当作 NC。
+离线 diff 包含新增、移除连接；结构校验拒绝不存在的引脚和同脚重复归网。
+
+### Connectivity → plan → sch apply（当前支持范围）
+
+```bash
+easyeda sch connectivity --window <id> > .easyeda/tmp/before.json
+# 在副本 after.json 中明确目标 connections；不修改 before.json
+easyeda sch plan .easyeda/tmp/before.json .easyeda/tmp/after.json > .easyeda/tmp/plan.json
+easyeda sch apply .easyeda/tmp/plan.json --dry-run
+easyeda sch apply .easyeda/tmp/plan.json --window <id>
+```
+
+`plan` 输出实际 playbook `version:1 / meta / steps`，不再输出占位 operations。
+当前仅支持已有引脚增加显式 `power`、`ground`、`net_port_in/out/bi` 连接；
+新增器件、换网、断连、改名、模块变化、普通 wire 路由均拒绝生成计划，不会自动改成标签。
+前后快照必须具有相同 projectId/documentId。无连接的引脚不自动推断为 NC。
+
+生成队列先核对整页 pin-to-net 基线，每次写入后和保存后分别回读核对；
+`expectedConnectivity` 是 playbook 的检查字段，验证失败即停。它不是事务回滚：
+先前已落地的动作保留并记录 journal。保护计划禁止目标覆盖、`--resume`、`--from/--to`，
+失败后重新导出实际快照再规划。内部 run 子命令继承目标页守卫。
+离线结构检查用于规划；执行时回读用于证明写入，二者职责不同。

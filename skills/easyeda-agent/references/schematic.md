@@ -1,6 +1,8 @@
 
 # EasyEDA Schematic
 
+> 1.4 先建立并校验 component/pin/net/pin-to-net，再布局。真实 wire 是连接首选；网络标签只作跨模块、跨页和电源辅助。模块复用遵循 [`docs/schematic-connectivity-model.md`](../../../docs/schematic-connectivity-model.md)。
+
 Use `easyeda-agent` typed actions. Do not write raw EasyEDA JavaScript unless a typed action is missing and the user explicitly accepts a debug path.
 
 > **本文导航**:Workflow · Production preflight gates · library-first 绘图 · netlist 批量实现 ·
@@ -292,7 +294,7 @@ easyeda doc switch <P2|PCB1|uuid> --project <名字>   # 切换:按页名/PCB名
 
 ### 原理图编辑
 
-- `schematic.components.list` — `--include-bbox` 附带每个元件渲染范围 `{minX,minY,maxX,maxY}`(供布局推理);`--include-pins` 附带每脚 `{pinName,pinNumber,x,y,noConnected}`，并明确返回 `pinsAvailable:true`；SDK 读脚失败会返回 `pinsAvailable:false + pinsError`，不再伪装成 `pins:[]`。内部布局写门还会请求 `includeConnectivitySummary`，得到 active-page 的 wires/buses/netflags/netports/netlabels/shortSymbols fail-closed 计数。两个常规 flag 可与 `--all-pages` 叠加(输出会显著变大)。
+- `schematic.components.list` — `--include-bbox` 附带每个元件渲染范围 `{minX,minY,maxX,maxY}`(供布局推理);`--include-pins` 附带每脚 `{pinName,pinNumber,x,y,noConnected}`，并明确返回 `pinsAvailable:true`；SDK 读脚失败会返回 `pinsAvailable:false + pinsError`，不再伪装成 `pins:[]`。connectivity 导出还请求 `includeDeviceIdentity`：把放置实例的 16 位 uuid 解析成 `schematic.component.place` 所需的 32 位器件库 uuid，无法唯一解析时返回 `deviceIdentityError`。内部布局写门还会请求 `includeConnectivitySummary`，得到 active-page 的 wires/buses/netflags/netports/netlabels/shortSymbols fail-closed 计数。两个常规 flag 可与 `--all-pages` 叠加(输出会显著变大)。
 - **`easyeda sch layout-lint`** — **布局自检**(治覆盖的机械真值)。拉 `components.list --include-bbox --include-pins`,Go 侧两两几何检查:**bbox 重叠 / 异件引脚重合 = ERROR**、**间距 < `--min-gap`(默认 2.54mm) / 锚点 off-grid / out-of-sheet = WARN**。生产过门使用 `--strict`，会把这些 WARN、缺失或畸形 bbox/anchor/pin 几何、旧 connector 无法证明 pin 读取成功的状态，以及“无可读 sheet、无法执行 out-of-sheet 判定”的状态一并升级为非零退出，避免 `0 overlap` 冒充布局已完成。
 **注意 `layout-lint` 只判器件本体** —— 标签之间、标签压器件、标签探出图纸它结构上看不见,
 那一半在 `sch clusters`(已进 `sch gate` 第 2 关)。zone-violation 判据已废弃:分区框从活体
@@ -390,6 +392,24 @@ EasyEDA's DRC does **not** treat two primitives sharing the same coordinate as e
 3. **NC pins still need explicit marking.** A pin without any wire/flag triggers a "悬空 / floating" warning even if your design intends it unused. Use a Non-Connected flag for those.
 
 Apply this rule when generating any power/ground/port connection — emit the wire first, then place the flag at the wire's free endpoint.
+
+### 1.4 电源与外围电路的物化策略
+
+原理图快照的 `pin_net` 是唯一电气事实，导线和标志是 Apply 阶段的派生图面。对每个
+网络先按模块收集 terminal，再按下面的固定优先级生成图面：
+
+1. 同一模块内、距离较近的外围引脚先用一条正交真实 wire 连接（例如 AMS1117 的
+   VIN/VOUT 与输入/输出电容），避免把本来连续的外围电路拆成一组同名标签。
+2. `GND`、`VCC`、`+3V3`、`+5V` 等全局网允许在多个 terminal 就近放置同名 power/
+   ground flag。只有被短 wire 森林覆盖的局部连接不再重复放旗；不要用一根跨页或环绕
+   整页的母线代替这些局部符号。
+3. 普通信号在模块内优先直连；跨模块/跨页/长距离才使用 netport 或 netlabel。规划器
+   以“拓扑正确、无短路、少 wire 数、少总长度、少拐点”为顺序优化目标，禁止闭环和
+   穿 pin 的路径。
+
+因此，电源符号可以多放，但每个 flag 仍必须有真实非零短桩；导线越少越好不等于删除
+必要的 pin→外围器件连接。完成 Apply 后必须用 `sch read`、`sch check`、
+`sch bridge-check` 和 DRC 对账，任何拓扑变化都停止队列。
 
 ## Missing Actions
 

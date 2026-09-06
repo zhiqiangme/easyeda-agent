@@ -33,6 +33,7 @@ import {
 	requireNumber,
 	requireString,
 	requireStringArray,
+	uint8ToBase64,
 } from './util';
 
 type Payload = Record<string, unknown>;
@@ -902,6 +903,11 @@ async function tagComponentPages(): Promise<Map<string, { pageUuid: string; page
 export const schematicComponentsList: Handler = async (payload) => {
 	const allPages = optionalBoolean(payload, 'allPages') === true;
 	const includePins = optionalBoolean(payload, 'includePins') === true;
+	// getState_Component().uuid is a 16-char placed-instance id, while
+	// schematic.component.place requires the 32-char device-library uuid.
+	// Connectivity export opts into this hydration so an IR snapshot is
+	// replayable instead of sending an instance id that makes create() hang.
+	const includeDeviceIdentity = optionalBoolean(payload, 'includeDeviceIdentity') === true;
 	// A fail-closed, read-only preflight inventory. It is deliberately captured
 	// before tagPages can cycle documents and always describes the page that was
 	// active when the request started, even when allPages=true.
@@ -980,6 +986,31 @@ export const schematicComponentsList: Handler = async (payload) => {
 	const serialized: Array<Record<string, unknown>> = [];
 	for (const component of components) {
 		const record = serializeComponent(component);
+		if (includeDeviceIdentity && record.componentType === 'part') {
+			const rawDevice = record.device as Record<string, unknown> | undefined;
+			const rawUuid = typeof rawDevice?.uuid === 'string' ? rawDevice.uuid : '';
+			// A valid library uuid is already authoritative; only resolve the
+			// suspicious instance-shaped identity to avoid needless API calls.
+			if (rawUuid.length !== 32) {
+				const resolved = await resolvePlacedDevice(record);
+				if (resolved.device) {
+					record.placedDevice = rawDevice;
+					record.device = {
+						libraryUuid: resolved.device.libraryUuid,
+						uuid: resolved.device.uuid,
+						name: record.name ?? '',
+					};
+					record.deviceResolution = {
+						via: resolved.device.via,
+						...(resolved.lcsc ? { lcsc: resolved.lcsc } : {}),
+						...(resolved.deviceFootprint ? { footprint: resolved.deviceFootprint } : {}),
+					};
+				} else {
+					record.deviceIdentityError = resolved.reason ?? 'no exact library match';
+					if (resolved.candidates?.length) record.deviceIdentityCandidates = resolved.candidates;
+				}
+			}
+		}
 		if (pageById) {
 			const page = pageById.get(component.getState_PrimitiveId());
 			if (page) {
@@ -3077,7 +3108,7 @@ interface NetlistPinNets {
 	available: boolean;
 }
 
-async function collectNetlistPinNets(): Promise<NetlistPinNets> {
+async function collectNetlistPinNets(_allPages = false): Promise<NetlistPinNets> {
 	const byDesignator = new Map<string, Map<string, string>>();
 	const muted = (): NetlistPinNets => ({ byDesignator, available: false });
 	let file: File | undefined;
@@ -4050,7 +4081,7 @@ const schematicRead: Handler = async (payload) => {
 	}
 
 	// JSON-authoritative pin→net per designator (same source as schematic.check).
-	const { byDesignator: pinNets } = await collectNetlistPinNets();
+ const { byDesignator: pinNets } = await collectNetlistPinNets(allPages);
 
 	const netToPins = new Map<string, Array<string>>();
 	const floating: Array<string> = [];
@@ -11388,8 +11419,29 @@ const debugExecJs: Handler = async (payload) => {
 	catch (err) {
 		throw edaError(err, 'exec_js failed.');
 	}
-	// A non-JSON-serializable return (e.g. a Blob) will not survive the wire;
-	// debug snippets that need binary should base64-encode it themselves.
+	// Preserve binary results across the JSON/WebSocket transport.  Returning a
+	// Blob directly causes JSON.stringify to emit `{}` (and using `.text()` can
+	// corrupt ZIP/Gerber bytes), so expose an explicit base64 envelope.
+	if (value instanceof Blob) {
+		return {
+			result: {
+				value: {
+					__type: 'blob',
+					mimeType: value.type || 'application/octet-stream',
+					size: value.size,
+					base64: await blobToBase64(value),
+				},
+			},
+		};
+	}
+	if (value instanceof ArrayBuffer) {
+		const bytes = new Uint8Array(value);
+		return { result: { value: { __type: 'bytes', size: bytes.byteLength, base64: uint8ToBase64(bytes) } } };
+	}
+	if (ArrayBuffer.isView(value)) {
+		const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+		return { result: { value: { __type: 'bytes', size: bytes.byteLength, base64: uint8ToBase64(bytes) } } };
+	}
 	return { result: { value: value ?? null } };
 };
 
