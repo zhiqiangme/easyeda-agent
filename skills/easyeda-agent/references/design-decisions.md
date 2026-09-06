@@ -1,6 +1,6 @@
 # 设计决策目录 (Design Decisions)
 
-本文是 [ADR-0002](../../../docs/adr/0002-design-proposal-and-interaction-modes.md) 落地的决策点清单，供 [`design-flow.md`](./design-flow.md) 的 **S0 设计方案书**阶段在放第一个元件之前，把这些**真实权衡**摊开给用户拍板，而不是 agent 悄悄选一个默认值再往后走。判据只有一条：**用户的回答会不会改变实际做法**——会才进本文，不会（只有唯一正确答案）就是 guardrail，继续以硬门禁形式内置在 `pcb-layout-conventions.md` / `auto-layout-sop.md` / `design-flow.md` 里（save 纪律、mutation 后 `doc reload`、layout-lint/DRC 硬门、PLANE 生成顺序、天线 keepout 必须覆盖全层等），本文**不重复**这些内容。每个决策点固定给出：决策问题、选项对比（优点/坑）、推荐默认、判据（一句话说清何时答案会变）、来源。「来源」只引**随 skill 分发**的 references 文件；个别仅存于项目开发机的实测数据以「实测沉淀」标注——其事实已完整写入表格本身，不依赖任何外部文件。
+本文是 [ADR-0002](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/adr/0002-design-proposal-and-interaction-modes.md) 落地的决策点清单，供 [`design-flow.md`](./design-flow.md) 的 **S0 设计方案书**阶段在放第一个元件之前，把这些**真实权衡**摊开给用户拍板，而不是 agent 悄悄选一个默认值再往后走。判据只有一条：**用户的回答会不会改变实际做法**——会才进本文，不会（只有唯一正确答案）就是 guardrail，继续以硬门禁形式内置在 `pcb-layout-conventions.md` / `auto-layout-sop.md` / `design-flow.md` 里（save 纪律、mutation 后 `doc reload`、layout-lint/DRC 硬门、PLANE 生成顺序、天线 keepout 必须覆盖全层等），本文**不重复**这些内容。每个决策点固定给出：决策问题、选项对比（优点/坑）、推荐默认、判据（一句话说清何时答案会变）、来源。「来源」只引**随 skill 分发**的 references 文件；个别仅存于项目开发机的实测数据以「实测沉淀」标注——其事实已完整写入表格本身，不依赖任何外部文件。
 
 ---
 

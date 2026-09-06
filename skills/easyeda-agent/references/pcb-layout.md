@@ -47,7 +47,7 @@ grid-snap/分档摆放)、板框、自动布局。入口与 guardrails 仍在 `p
   报告头带 `sides`(如 `[bottom 134 / top 32]`),**双面板的 overlap 数字现在可以直接信**。
   实测 box-v2 rev-a(166 器件 / 642 焊盘,双面贴片):**overlap 116 → 0、tight 7 → 3**,与人工按层
   重算的真值一致(同层重叠 0)。等价于 KiCad 的分层 courtyard(`F.CrtYd`/`B.CrtYd`)语义 ——
-  见 [`docs/ecosystem-survey.md`](../../../docs/ecosystem-survey.md) §9.3。
+  见 [`docs/ecosystem-survey.md`](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/ecosystem-survey.md) §9.3。
   **同时补了网络感知 —— 新增 `short` ERROR**:两器件 bbox 相交时进一步比**焊盘铜皮**,
   若两块铜在**共享层**上真的压在一起且**分属不同网络**,报 `ERROR short  C2.1[VBAT_RAW] ↔ D2.2[SW1_NODE]`
   —— 定性从「靠太近」升级成「这两网短路」,与 KiCad 的 `shorting_items` 对齐。short 与 overlap 同级致命

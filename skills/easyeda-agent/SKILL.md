@@ -1,223 +1,90 @@
 ---
 name: easyeda-agent
-description: "Community EasyEDA Agent automation skill for EasyEDA Pro schematic and PCB work through the local easyeda-agent CLI/daemon/connector. Use when designing a board from scratch; inspecting, cleaning up, or safely refactoring an existing wired schematic; arranging multi-page functional modules; drawing page-scoped module frames and text labels; preserving and reconciling pin-to-net topology; placing/wiring real LCSC/JLC library parts; syncing schematic changes into PCB; laying out PCB components; running EasyEDA DRC/check/bridge-check/layout-lint; exporting BOM/netlists/artifacts; querying the embedded circuit-block library (`easyeda blocks ls/show/search`); or applying the bundled EasyEDA design workflows and conventions. 覆盖嘉立创EDA专业版原理图/PCB、混乱原理图整理、多页功能分区、框选文字标注、布线、铺铜、板框与机械门禁。适用于嘉立创EDA(JLC EDA / JLCEDA / LCEDA / EasyEDA Pro)与立创商城(LCSC)元件的电路板设计自动化。"
+description: "通过本地 easyeda CLI、daemon 和连接器操作嘉立创EDA专业版（EasyEDA Pro）：设计或修复原理图、核对器件与引脚网表、从 JSON 组合功能电路并 Apply、布局布线 PCB、运行检查和导出制造文件。适用于已有 EDA 工程操作及数据驱动电路设计。"
 license: MIT
-compatibility: "Requires the local easyeda-agent CLI and daemon (macOS/Linux/Windows) plus the EasyEDA Agent Connector extension installed in EasyEDA Pro with 'Allow external interaction' enabled. Bundled scripts need Python 3. Network access is needed only for LCSC part lookup and self-update."
+compatibility: "Requires the local easyeda CLI/daemon and EasyEDA Agent Connector with Allow external interaction enabled. Python 3 is used by bundled helpers; online library lookup and updates need network access."
 metadata:
   author: zhoushoujianwork
-  version: "1.4.0"
+  version: "1.4.2"
   homepage: "https://github.com/zhoushoujianwork/easyeda-agent"
 ---
 
 # EasyEDA Agent
 
-> **1.4 原理图基线**：连接核心（component/pin/net/pin-to-net）先于布局；每个框选功能电路按 Lib 复用。详见 [`docs/schematic-connectivity-model.md`](../../docs/schematic-connectivity-model.md)。网络标签仅作辅助别名。
+用 typed CLI 经 WebSocket 调用 EasyEDA Pro 官方 `eda.*` API。CLI/daemon 和连接器需另行安装；
+这是社区 Skill。安装、升级或连接异常时读 [environment-setup.md](references/environment-setup.md)。
 
-Use the local `easyeda` CLI and daemon to operate EasyEDA Pro through typed,
-observable actions. This is the community `easyeda-agent` workflow, not an official
-EasyEDA skill; the suffix is intentional so users can distinguish it from upstream
-EasyEDA tooling.
+## 开始工作
 
-> **本 skill 单独装上没用 —— 它要驱动两个外部件:本机 `easyeda` CLI/daemon + EasyEDA Pro 里的连接器插件。**
-> 源码与文档:https://github.com/zhoushoujianwork/easyeda-agent
->
-> **① 装 CLI/daemon**(一行,自动识别平台;已装过则用 `easyeda update` 升级):
-> ```
-> curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh
-> ```
->
-> **② 装连接器插件(`.eext`)—— 二选一,都要在 EasyEDA Pro 里操作:**
-> - **立创EDA官方插件市场**(推荐,一键装、平台可原地自动更新):
->   https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector
->   ⚠ 市场版本可能**滞后** CLI 若干 minor。
-> - **GitHub Release 直下**(与 CLI **严格同版**,四件套同版以它为准):
->   https://github.com/zhoushoujianwork/easyeda-agent/releases/latest
->   下载其中的 `easyeda-agent-connector.eext` → EasyEDA 扩展管理导入。
->   **同 uuid 更新必须先在「已安装」卸载旧的**,否则导入静默失败;导入后**完全退出重启
->   EasyEDA**,否则已开窗口仍跑旧代码并抢 daemon。
->
-> **③ 开权限**:EasyEDA 里打开工程 → 启用「允许外部交互 / Allow external interaction」,
-> 否则连接器的 WebSocket 到不了 daemon。装完用 `easyeda health` 验证(应看到 window 与
-> connectorVersion)。
->
-> **升级:`easyeda update`**(CLI 二进制 + skill 目录,sha256 校验后原地替换);
-> `easyeda update --check` 只看不改,连接器只能人工重装 → environment-setup.md §0.5。
+1. 按用户任务选择下表中的流程，只加载相关参考。已有项目的小修复沿用已确认的需求和授权。
+2. 编辑器操作前运行 `easyeda health`，确认工程、活动页和连接器版本。
+3. 手动命令用 `--project <project>` 指定工程；变更带 `--doc <page>`，操作已有页面。
+   已生成的受保护 Apply 队列沿用其固定目标，不再用名称覆盖。
+   先读取将要修改的器件、引脚、网络及几何；位号或 primitiveId 不明确时不能盲写。
+4. 以 `easyeda <domain> <command> --help` 和 `easyeda actions` 为参数真值。
+   MCP 若可用，只是同一套 CLI/typed action 的入口。
 
-> **MCP 可选入口:**若当前 agent 暴露 `easyeda_*` MCP tools,可优先用它们完成 health、
-> action discovery、typed calls、blocks 和 workflow 操作。MCP 只是同一 CLI/daemon 的
-> stdio 适配层;下方全部铁律、inspect-before-mutate、阶段门和存盘要求保持不变。
+| 任务 | 先读 |
+|---|---|
+| 本地原理图数据、Lib 组合、修复位号、Apply | [schematic-data.md](references/schematic-data.md) |
+| 已有原理图检查或器件/连线小修 | [schematic.md](references/schematic.md)；具体接线见 [schematic-wiring.md](references/schematic-wiring.md) |
+| 原理图排版、已有连线的移动/整理 | [schematic-placement.md](references/schematic-placement.md)、[auto-layout-sop.md](references/auto-layout-sop.md) |
+| 从需求到整板、原理图转 PCB | [design-flow.md](references/design-flow.md)；未确定的设计选项见 [design-decisions.md](references/design-decisions.md) |
+| PCB 放置/布线/检查 | [pcb.md](references/pcb.md)，再按任务读 [pcb-layout.md](references/pcb-layout.md) 或 [pcb-routing.md](references/pcb-routing.md) |
+| 选型、库器件、手册与标准电路 | [part-selection.md](references/part-selection.md)、[standard-parts.json](references/standard-parts.json)；先 `easyeda blocks search` 查可复用电路 |
+| 原理图/PCB 绘图规范 | [schematic-layout-conventions.md](references/schematic-layout-conventions.md)、[pcb-layout-conventions.md](references/pcb-layout-conventions.md) |
+| 制造规则 | [pcb-design-rules.md](references/pcb-design-rules.md)、[fab-rules-jlcpcb.json](references/fab-rules-jlcpcb.json) |
+| action 或队列字段 | [actions.md](references/actions.md)；未知官方接口先 `easyeda api search/show` |
+| 提交已验证电路到块库 | [standard-blocks-contributing.md](references/standard-blocks-contributing.md) |
 
-> **本 SKILL.md 顶部是「抗遗忘扫读区」——执行任何板级任务前先扫这几屏,别凭记忆走。**
-> 顺序:① **铁律**(不可违反)→ ② **流程停点 / 档位默认 / 块地图** 三张速查 → ③ **顺序硬约束**。
-> 具体细节**不堆在这里**——按下方 **What To Read** 的加载触发表按需读 reference(渐进式披露)。
+## 1.4 原理图主流程
 
-## ① 铁律(不可违反)—— 抗遗忘扫读区
+**先确定连接数据，再计算几何，最后转换与回读。** 新设计依据具体型号的数据手册和典型电路；
+已有图先导出 `sch connectivity`，未知引脚或网不能靠截图推断。
 
-扫读式硬约束,任何模式都不问用户、不商量。违反 = 返工或坏板。每条带 `→` 指到细节文件。
+- `component.id` 是不透明稳定 ID，`ref` 是显示位号，功能名存 `role`。
+  保留正常位号的拼写、前导零与顺序；错误名称用 `sch designators` 按官方库前缀修复，
+  端子也不强制改为 `J`。不从 ID 反推 ref，不覆盖原生 `uniqueId`。
+- 按功能组织 Lib：核心器件加外围，以真实短线连接。VCC/GND 可局部重复放置；
+  标签用于电源或模块边界，不替代连接图。多引脚同功能（例如 AMS1117 双 VOUT）逐脚核对。
+- 从官方接口读取器件与引脚几何，写入源 JSON。`sch compose` 在本地计算端子直线错长、
+  紧凑标题和左上起排的 Z 字等高布局。默认 A4 一页，容量不足按已确认的功能拆页。
+  它不自动补电路、旋转器件、缩放符号或创建页面。
+- 每个 Lib 带粉色虚线框和 **0.2 inch = 20 raw** 标题。固定贴边尺寸为 **10 raw**，
+  标题与内容净距 **5 raw**。标题可放上下空档；本版本不生成独立 Notes。
+- 生成 `sch apply` 队列前读取目标页新鲜快照。覆盖不同图面用 `compose --replace`，
+  该路径会清目标页并保留纸张，必须在用户已授权重建的范围内使用。
+- 完整执行队列，回读全部 pin→net/NC、器件身份、线段及模块框；运行检查并显式保存。
+  连接正确与布局可读都要验证，不能以截图或单个 DRC 数字代替数据对账。
 
-1. **窗口操作前先 `easyeda health`** — 否则打到错窗口 / 无连接器;它带 `versionGate` 判定块,**版本错位时后续动作当场被拒**(拒绝消息自带修法;明知故犯:`--skip-version-check` / `EASYEDA_SKIP_VERSION_CHECK=1`,会写审计)。撞门先对版本,别怀疑电路或工具坏了。→ environment-setup.md §0.5
-2. **只用 typed `easyeda` action** — 只有无对应 typed action **且**用户明确接受 debug 路径时才 `debug.exec_js`。
-3. **mutate 前先 inspect** — 放/移/连/同步/存之前先读 doc/页/器件/引脚/板层/网络/规则,别盲改;破坏性操作(clear/delete/bulk import)先确认。
-4. **无图纸不摆放/布线** — 找不到 sheet 立即停,让用户建/批准 A4(默认 A4)。→ design-flow S1
-5. **PCB mutation(rip-up/route/delete/via/track)后先 `easyeda doc reload` 再读/判/DRC** — **机械强制**:不 reload 就读,daemon 直接拒(`STALE_READ`)并告诉你下一步该跑什么;同网 Connection Error 暴增先 `pour-rebuild`,不是真断。**正常修法永远是 `doc reload`**;确需读旧状态才用逃生口 `--force-stale-read "<理由>"`(入审计、只放 PCB 读、解不开布线门;**不是** `--force`——那是布线阶段门)。→ pcb.md「PCB mutation → doc reload 门」
-6. **判对错只看 `list/check/drc/layout-lint/layout-score`,不看截图** — 截图会 stale/blank;data 有内容但截图空 = 窗口没渲染(切前台),不是设计错。(`layout-score` 是**诊断视角不是门**——门只有 `layout-lint --gate` 一个;且它的 `skipped` 维是「没测」不是「满分」。)`pcb drc/check` 这类重画布计算**需 PCB 在前台**,超时=切前台**单发一次、绝不循环重试**(重发被 `ACTION_BUSY` 拒)。**录制/演示模式例外**:截图变交付物 → design-flow 录制/演示模式。
-7. **每过一个阶段门显式 `save`(sch/PCB)** — place/wire/modify 只改内存,autosave 只兜底;整板每 ~10 件 save 一次。→ design-flow S 段 💾
-8. **手工连任何已知外围前先查块库 `easyeda blocks`**(离线,无需 daemon/窗口)— `blocks ls` 看全量,照抄验证过的块只重绑端口。**查不到 → 起草 `block-gap` issue;块用出问题(脚名不符/拓扑错/停产)→ 起草 `block-bug` issue 带证据 —— 都必须经用户确认后才 `gh issue create`,绝不自动上报**。→ ② 块地图速查 · standard-blocks-contributing.md §七
-9. **netflag 必须经真 wire 连、离 pin 非零距** — 重叠坐标 EasyEDA 不认作连接;禁零长 wire;多脚同名 pin 要全连(如多 GND、AMS1117 双 VOUT)。→ schematic.md
-10. **RF/天线 keepout 覆盖每一层** — top+bottom no-copper + 内层 no-inner-electrical;top-only 会被底层 pour 灌到失谐。→ pcb-routing.md「Keep-out / rule regions」
-11. **丝印每个标记落在器件本体/courtyard 之外、装配后不被遮** — 端子塑料罩/卡座壳/按键帽会盖住 footprint 内的丝印 = 等于没标。→ design-flow P9
-12. **禁用 `eda.sch_Netlist.getNetlist()`**(已废弃、悬空脚挂死)— 网表走 `sch read/check/netlist/export`;raw 路径不得已才 `getNetlistFile()` 读 `File.text()`。→ schematic.md / actions.md
-13. **电气 clearance ≠ 手焊可达性** — P2 先持久化装配档案:`pcb stage set-assembly --profile hand-solder`(默认/下限40mil;大焊盘烙铁通道60mil);`layout-lint --gate` 有任何 tight pair 即失败,任何器件四面被围、无一侧 ≥60mil 烙铁通道(no-access)也失败;未过门不得确认布局。→ design-flow P2/P6 · issue #99
-14. **阶段门禁机械强制,不必预读细则** — 布线前、布线后各一道门,未过一律被拒(daemon 在 /action 层也拦,raw 调用绕不过)。撞上去的拒绝消息**自带下一条该跑的命令**,照做即可。切入/恢复会话:`workflow status --reconcile` → `workflow advance`。→ design-flow P6(含 force 分级 #132)/P10
-15. **原理图按功能模块画框并标标题** — 默认先完成一页,分页需按功能另行设计。每个 Lib 的呈现数据包含虚线框和粉色标题,标题字高 **0.2 inch = 20 原理图坐标单位**。框包住核心器件、外围、导线和电源符号；页边/框内最小边距、模块间距与标题内缩统一10 raw（0.1 inch / 2.54 mm），标题净距5 raw；图签同样保留10 raw净距。先计算再 Apply 并回读。1.4 不提供独立 Notes 功能,不要求每模块说明。→ design-flow S1–S3
-16. **「探出图纸」≠「比图纸还大」** — 前者挪一挪能解;后者(`page-too-small`)挪多少次都没用,必须换手段,且**分页是设计决策 → 停手问用户**(工具不自动分页)。别人肉重试:`--max-attempts`(默认 3)会替你停手。→ design-flow S3
-17. **S0 先于任何放置** — spec 必须在首个 `page-new` / `place` / `block-apply` 前落盘并通过 `easyeda spec validate --strict`;先画后补只能算记录,不能证明设计决策已冻结。→ design-flow S0
-18. **位号与功能名分开** — `component.id` 稳定、`ref` 为器件库前缀加数字、功能名存 `role`。保留已有正常位号的拼写、顺序和前导零；修正历史功能位号先查 `lib device get` 的 `property.designator`，端子也不可凭用途强制指定 `J`。`sch designators` 从全工程数据分配，只修改非标准项，再经受保护的 `sch apply` 原地写入。不得从 ID 反推 ref，也不得覆盖原生 `uniqueId`。→ references/schematic.md
+数据字段、可运行命令及失败恢复集中在 [schematic-data.md](references/schematic-data.md)。
+`sch plan` 只支持明确的标记连接增量；`materialize` 只负责基础放置，不能代替完整 Lib 组合。
+原理图 `sch autolayout` 与 PCB 自动布线是不同功能，按各自参考使用。
 
-## ② 流程停点 + 档位默认 + 块地图速查
+## 执行与验证约束
 
-**执行前先定位自己在哪个阶段、这一步是不是停点、走哪个档、这阶段要不要先查块。** 完整流程 S0–S6 / P0–P10
-见 [`references/design-flow.md`](./references/design-flow.md);非平凡板(>~10 件或要交付/排 PCB)一律走它的 gated flow。
-这里是执行时扫读用的顶层速查。
+- typed action 已有对应能力时使用它；无对应能力且用户接受调试路径时，才用 `debug.exec_js`。
+- 使用真实非零导线连接 netflag 与 pin，坐标重合不算连接。原理图坐标 **y 向上**，网格 5 raw。
+  符号方向以 [orientation.json](references/orientation.json) 和实际回读为准。
+- 保留明确 NC，不删除器件物理引脚，也不将缺失连接自动改为 NC。
+  网表使用 `sch read/check/netlist`；不调用已废弃、可能挂起的 `sch_Netlist.getNetlist()`。
+- 写入超时或部分成功后先回读，不盲重试。受保护队列不能用 `--resume/--from/--to` 跳过守卫；
+  从实际状态重新生成。Apply 不提供事务撤销；autosave 仅兜底，检查点须显式 `sch save` / `pcb save`。
+- 已有用户授权持续有效，不因流程表重复索取许可。新出现的破坏性范围、未决电气/机械要求才需澄清。
+  门禁失败时先区分“检查没运行”与“设计不合格”，不靠关闭检查取得通过。
+- PCB 变更后按命令提示 `doc reload` 再检查。保留分档放置、手焊可达性、关键网、RF 全层 keepout、
+  丝印极性和制造规则要求；详见 PCB 流程。阻塞错误、未评估的 WARN 或未运行的项目不能记为通过。
 
-### 何时必须停手交回用户(里程碑档 = 真实用户默认)
+## 验证交付
 
-| 停点 | 触发 | 要点 |
-|---|---|---|
-| ① S0 方案书 | 进 S1 前 | 架构/叠层/地策略/接口取向每条摊选项+坑+推荐让用户拍板;**必须落成磁盘文件**才算过门,不能停在对话里 |
-| ② sch→PCB 前 | 原理图完成 | 逐页 **`easyeda sch gate --strict --doc <page>` 出 `verdict=pass`**(一条命令跑完 layout-lint→check→bridge-check→drc 四关,顺序与阻塞判据固定在代码里,别自己拼)+ pin→net 黄金表对齐(gate 判不了「接对没有」,只判「接得合不合法」);**`verdict=blocked` 是检查器没跑成,不是板子有问题——先修 health/doc 再重跑,别去改电路**;DRC 聚合 WARN 必须审阅并报告；**多页/多模块板还需确认分区框+区名标注已画**(`sch zones status` 看认领、`sch zone-draw` 补画——手工摆放路径不会像 `autolayout --apply` 那样自动画,容易漏)**;标题为粉色、0.2 inch,方框为虚线** → design-flow S5 |
-| ③ 发板/交付前 | 导出制造 | 交付摘要说清偏差(降级决策/遗留 WARN) |
-| S2/S3 `page-too-small` | 块/组比整页可用区还大 | 工具只停手不建页:摊给用户拍板 ①独立成页 ②继续分页 ③改标签朝向收小组(A4-only 不换纸)→ design-flow S3 |
-| P2 摆放前 | 布局起手 | 先问单/双面布局 + 焊接工艺;立即用 `pcb stage set-assembly` 落盘,手焊默认 `min-gap=40mil`/大焊盘通道 `60mil` |
-| P2 边缘接口件 | 端子/USB/SD/排针/按键/IPEX | 朝向 + 边序 = 装配体验,agent 猜不了,**必须用户确认**;先 `blocks show` 读块 placement 摊给用户 |
-| P2 分档落状态 | 每档摆完确认后 | **`pcb stage confirm-tier <1-4> --parts …` 逐档落盘**(#125 机械化):档1孔→档2边缘件→档3主芯片+RF→档4卫星(缺省=其余);跳档被拒、动某档件只作废该档及其后;四档未齐 `confirm-layout` 拒绝封章 |
-| P7 稠密板布线 | 见下档位 + P7 迷你清单 | **停下请用户在 EasyEDA 菜单点「布线→自动布线」**;交出去前必做两步见下方 P7 迷你清单,跑完再接手 |
-| 破坏性操作 / 门禁失败 | clear/delete/bulk;`pcb new-board --force`(已绑板会搬走原理图=旧板原理图丢失);layout-lint ERROR / DRC fatal | 停在失败数据,不带病往下 |
+说明修改范围、源数据与实际图面的差异、验证结果、已保存页面及尚未解决的问题。
+`layout-lint` 检查几何，pin→net 黄金表检查接对与否，`sch gate --strict` 汇总原理图门禁。
+官方 DRC 可能只返回聚合数；INFO/WARN 应单列，不能把“0 fatal”称为全部通过。
+`layout-score` 的逐维结果、`skipped/degraded` 是诊断，不代替硬门。
 
-里程碑档**只有这几处停**,不是每步都停(逐步档才每步停);全自动仅用于回归/CI/operator/录制。
+用 `sch export-image` 生成官方导图辅助确认文字与可读性；原生视口截图可能未刷新。
+PCB 制造交付还须确认层叠、GND、电源、丝印与导出文件。离线单元测试或一个图页验证，
+均不等于从客户需求到 PCB 的全流程验收。
 
-### 档位默认(别自作主张改)
-
-| 维度 | 默认 | 备注 |
-|---|---|---|
-| 交互模式 | **milestone(里程碑)** | 非逐步、非全自动 |
-| 布线档 | 按 layout-lint ratsnest 密度选 | 稀疏(交叉<100)→ `route-short`;**稠密 → 请用户点原生自动布线(默认)**;全 headless 才 Freerouting(`pcb autoroute`,兜底,**不顶替默认**)。交出去前先跑 ↓P7 迷你清单 |
-| 摆放优先级 | 孔 → 边缘件 → 主芯片+RF → 卫星件 | 只有卫星件交 auto-place;孔最先放 + 锁定 |
-| 图纸 / 板框 | A4 / compact | 无尺寸信息时 compact;compact 时主芯片按**紧凑网格**播种(模块中心距≈包络+300~400mil,别撒 2000mil 外),摆位/判尺寸**只信 `pcb list --include-bbox` 实测 bbox**(含 courtyard,常比封装大 40%+),不猜标称 → design-flow P1/P2 |
-| 原理图组织 | **功能框+标题,默认一页,见铁律 15** | 框和标题属于布局呈现数据,与器件/导线一并转换、Apply、回读;标题粉色、字高 0.2 inch(20单位),框为虚线。1.4 不生成独立 Notes → design-flow S1–S3 · schematic-layout-conventions.md |
-| GND 内层 | `power-planes --gnd-plane` → 终态 PLANE | SIGNAL 铺→翻 PLANE→rebuild,不停在 SIGNAL |
-| `pour-fit --replace` | **true(会清跨层同网 pour)** | 顶/底 GND pour 要显式 `--replace=false` |
-| 线宽档(net-class) | 按角色:信号=live默认 / 支线(3V3/1V8)10 / 主干(+5V)15 / 大电流(VBUS/VIN)20mil | `pcb net-classes` 查当前表;`route-short` 自动按角色给宽;偏细电源线被 `pcb check` **width-under-spec** 逮(§7.8) |
-| 电源走铺铜 | **2层 `power-pour` / 4层 `power-planes`** | 电源走铜面不走细线(#1 DRC 源);别拿细线穿焊盘阵布电源,裸电源网被 `pcb check` **power-not-poured** 逮 |
-| 布局质量档 | **门=`layout-lint --gate`(唯一);质量表=`pcb layout-score --spec <s0>`(诊断,不落确认)** | 只有一个门,别跑成两个。layout-score 九维各 0-100+逐器件归因;**默认不设 `--min-score`**(只有 blocking=短路/重叠/出板框才非零退出),要当门用才显式给(建议 75=good 档下沿)。带 `--spec` 才解锁 flow-order 与 internal 连接器判定,否则这两维 **skipped(「没测」≠「满分」)** → design-flow P6。原理图侧对应 **`sch layout-score`**(五维:标签折叠/标签反向/外围贴核心/长链挤压/版面整洁)——同样诊断视角,**每条归因带填好真实位号坐标的 fix 命令,照抄执行即可修**;门仍是 `sch layout-lint`+`sch check` |
-
-### P7 交自动布线前必做两步(常被遗忘,已实测踩坑)
-
-稠密板停手交用户点原生自动布线**之前**,这两步不做完就交出去 = 关键网被路由器冲掉或整个交给它不擅长的活:
-
-1. **关键网先自布并锁定** — 一条命令 **`pcb route-critical`**(#127:电源按层数 planes/pour → 差分对双源识别+成对布线+skew 实测 → 自动 `track-lock`);单步手工同旧法(`pcb fill`/`power-planes`/`pcb track-lock`)
-   锁死(否则自动布线器 / `pour-rebuild` 会把手布的关键线冲掉)。
-2. **停手时必念「自动布线对话框」4 条**(漏一条毁掉第 1 步):① 「已有导线/过孔」选**保留**、绝不选「移除」
-   ② 「布线图层」只勾**顶层+底层**、取消内层 1/2 ③ 「忽略网络」加**已在平面的电源网**(GND、3V3/VDD)
-   ④ 其余默认。→ 细节 design-flow P7.0 + 自动布线对话框清单
-
-### 块地图速查(块携带多维知识,按阶段读对应 map)
-
-命中块后,不同阶段读块里不同的 map;每行统一**先 `easyeda blocks show <id>` 读对应 map**:
-
-| 阶段 | 读块的 map | 内容 |
-|---|---|---|
-| S0 / S3 | `internal_nets` · `ports` · `parts` | 照抄拓扑(引脚用功能名零改号)/ 重绑边界网络 / 选型免做(parts 指回 standard-parts) |
-| P2 | `placement` | 板边 / 朝向(edge/side/orientation,**须用户确认**) |
-| P2 / P8 | `pcb_layout`(`*-adjacency` / `ep-*`) | 去耦·晶振贴脚距离(P2)/ EP 热过孔·接地缝合(P8) |
-| P4 | `pcb_layout`(`rf-keepout` / `balun-mirror`) | RF 禁布 / 巴伦镜像(severity=must) |
-| P7.0 | `signals` | 差分对 / 阻抗(`impedance_ohm`+`impedance_kind`)/ 等长(`length_match_mm`) |
-| P9 | `silk` | 逐脚标注(`pins`/`label`/`note`) |
-
-**搜索策略**:`blocks search` 命中 id/desc/category/port/part——按**功能**(rs485/buck/gnss)、**芯片**(ch340/cc1101)、
-**端口网**(5V/USB_DP)三维轮换搜;一词没中换维度别急着手接;或 `blocks ls --category <power|usb|usb-serial|rf|comms|storage|sensing|mcu|mcu-support|indicator|button|audio|display>` 浏览整类(类目以 `blocks ls` 实际输出为准,别信这里的枚举过期与否)。
-
-## ③ 顺序硬约束(反了必返工)
-
-每条带 `→` design-flow 锚点;这些是**同级铁律级**的强顺序约束,散在深处易漏,汇总于此:
-
-1. **摆放过 assembly+routability gate 前不布线**(手焊先持久化 profile;`layout-lint --gate` 必须 0 tight)→ design-flow P2/P6
-2. **P6 可布性门在 P7 布线之前**(≥目标分、0 overlap、ratsnest 可控)→ design-flow P6
-3. **P7.0 电源/差分先布并 `track-lock`,再交自动布线**(见上方 P7 迷你清单)→ design-flow P7.0
-4. **禁布区 / 丝印(P4/P5)在布线 P7 之前**(布完再加会逼返工重绕)→ design-flow P4/P5
-5. **改层数 / `outline-fit` 在铺铜布线之前** → design-flow P8
-6. **PLANE 先铺 SIGNAL 再翻;PLANE 翻好后禁打异网 via**(官方缺陷 #32 不挖 anti-pad、`pour-rebuild` 不补救;换层先删 via 走外层,`pcb check via-crosses-plane` 会标出)→ design-flow P8
-7. **布完必过 post-route check 门再进丝印/交付**(`workflow advance` 跑 pcb check,ERROR/power-not-poured/width-under-spec 清零才过;WARN 挂着不处理曾致 5V 细线违规漏到人工评审才被抓)→ 铁律 14
-
-## What To Read(加载触发索引 —— load-more)
-
-按走到的场景/阶段**按需**读对应 reference(渐进式披露),别预加载全部:
-
-- `health` 显示 `windows: []` / `NO_CONNECTOR`,或改了连接器(`extension/`),或
-  **版本对不齐**(`connectorVersionOk:false`、`UNKNOWN_ACTION`、用户问「怎么升级」):读
-  `references/environment-setup.md`(§0.5 用 `easyeda update --check` 一次看清 CLI/skill/连接器三方版本)。
-  web 编辑器(`pro.lceda.cn`)+ chrome-devtools MCP 时
-  agent 可自举全环境;**桌面客户端 chrome-devtools 够不到窗口,需用户手动开/切工程**(连接器照常附着,typed action 一样)。
-- **整板 / 从零 / >~10 件,或走到某阶段拿不准**:先读 `references/design-flow.md`(流程脊柱 S0–S6 / P0–P10,顶部有阶段 TOC)。含 S0 事前摸底子步 `references/design-pre-analysis.md`(轻量摸底,可选、非门禁)。**S0 方案书 spec 写完必跑 `easyeda spec validate`(无 ERROR 才算过门,`--strict` 交付前用)**——字段形状(含 `flow`/`modules[].kind`/`interfaces[].ref·edge·facing·internal`)在 design-flow S0。
-- **布线阶段(P7)选档 / 关键网先行 / 自动布线对话框清单**:读 `references/design-flow.md` **P7 三档阶梯**——别停在 `pcb-routing.md` 的命令手册(那里只给命令,布线档默认在 design-flow)。
-- 架构权衡坑(真选择,非唯一答案——叠层、地策略、接口取向、成本档、单/双面、焊接工艺):读
-  `references/design-decisions.md`;S0 从中产出方案书让用户确认。(RF/天线 keepout 是 guardrail 铁律 10,不进这张决策表。)
-- **Schematic work**:先读 `references/schematic.md`(入口:器件放置 / Actions 目录 / 电气铁律 /
-  guardrails)。**按需再读**——不要一次全拉:连线细则 → `references/schematic-wiring.md`;
-  摆放命令(三层布局体系 / autolayout / autoplace-free)→ `references/schematic-placement.md`。
-- **混乱/已连线原理图整理、多页高质量布局、功能框和文字标注**:同时读
-  `references/design-flow.md` 的 S1–S6、`references/auto-layout-sop.md` 的
-  “已连线页安全整理”，以及 `references/schematic-placement.md` 的 “Functional frames +
-  text labels”。先保存 pin→net/NC 黄金表，任何布局重构后必须逐页对账。
-- **PCB work**:先读 `references/pcb.md`(入口:「块的 PCB 约束(先查)」+ 坐标系 + Workflow +
-  `doc reload` 门 + guardrails + 命令目录)。**按需再读**——不要一次全拉:动铜(布线 / 过孔 /
-  铺铜 / 禁布区 / 填充区域)→ `references/pcb-routing.md`;摆放(sch→PCB 同步 / 器件 CRUD /
-  align·distribute·grid-snap / 板框 / 自动布局)→ `references/pcb-layout.md`。
-  - 查任一 typed action 签名、或 >5 步原理图批量操作要用 `easyeda sch apply` 队列：读 `references/actions.md`。
-- **DRC / 制造规则地板与 fallback**:读 `references/fab-rules-jlcpcb.json`(live `pcb.drc.rules` 优先,此表作 fallback seed + clamp floors,**永不发出低于 manufacturingMin 的 track/via/gap**)。
-- **初级常见问题 / UI 排障**(库更新后符号变化、网络名显示/匹配、选择过滤、丝印/图层不可选、位号 `?`、过孔重叠、铺铜与填充区域混淆、规则导入覆盖、工程/浏览器/考试流程):读 `references/beginner-troubleshooting.md`。其中槽孔尺寸是培训经验值,必须与 live 制造规则比较并取更严格者；考试条目只用于考试场景。
-- **PCB 设计规范手册(人读正本)**:`references/pcb-design-rules.md`——线宽阶梯/过孔/布局/走线/铺铜/Mark点/拼板/丝印/叠层/DRC 三级清单;`pcb check` 报错信息里的 `[规范 §N]` 即指此手册章节,照章修。
-- New/uncertain raw `eda.*` API:先 `easyeda api search/show`,再查官方 prodocs 参考页(方法为 `@alpha`/`@beta`/`@deprecated` 或有已知 upstream issue 时),把 caveat 记进 references 再固化成工作流。
-- Schematic 布局规则:读 `references/schematic-layout-conventions.md`。
-- PCB 摆放/布线规则:读 `references/pcb-layout-conventions.md`。
-- CLI 摆放/布线硬坑 + auto-layout/autoconnect SOP:读 `references/auto-layout-sop.md`。
-- 器件选型、JLC/LCSC 排名与标准化:读 `references/part-selection.md`(选型前**先查块**,块 `parts` 已固定标准外围选型)+ `references/standard-parts.json`。已放置件**换型号**用 `easyeda sch replace --id <pid> --lcsc <C号>`(pinDiff 非空须重接线)。
-- **电路块库**:`easyeda blocks ls/show/search`(离线,详见铁律 8 + 块地图速查);贡献一个新块见
-  `references/standard-blocks-contributing.md`(验证过的外围回流入库,署名 + `validated` 门)。
-- Netflag/netport 旋转真值:用 `references/orientation.json`;never hand-edit 派生的旋转表。
-- 图纸/标题栏几何约定:读 `references/sheet-templates.json`。
-
-## Bundled Scripts
-
-Scripts live in `scripts/` and are intended to be run directly when useful:
-
-- `scripts/lint.sh <project>`: live schematic lint with optional diff baseline.
-- `scripts/tests/run.py`: linter rule-trust harness; run after changes to
-  `orientation.json`, linter rules, fixtures, or connector orientation facts.
-- `scripts/bom-enrich.py <bom.tsv/csv>`: fill EasyEDA BOM Supplier Part values from
-  `standard-parts.json`.
-- `scripts/parts-add.py`: append resolved library parts into `standard-parts.json`.
-- `scripts/parts-select.py`: deterministic part-selection helper.
-- `scripts/calibrate.js`: live bbox calibration for netflag/netport orientation after
-  importing a new connector build.
-
-(电路块库的浏览/查找是离线 CLI `easyeda blocks`,不是 `scripts/` 脚本;块校验是 Go 测试
-`go test ./internal/blocks/`,跟 `make test`/CI 跑。)
-
-## Deliverables
-
-Summarize changed primitives, commands run, DRC/check/lint status, saved checkpoints,
-and artifact paths. If a gate cannot pass, stop at the failing data, explain the next
-repair step, and do not claim the design is complete. 录制/演示模式下,额外列出每张阶段图并
-标注 **native EasyEDA 截图** 或 **data-rendered 图**,显式报告任何 stale/替换帧。
-
-**PCB 交付摘要额外必报布局质量(#167)**——只报一个综合分等于什么都没说:
-① **逐维分**(九维各自 0-100 + 加权综合 + verdict);② **每个弱维「是哪几个器件拉低了它」**
-(`pcb layout-score --all` 的归因,`penalty` 就是「先动谁」的排序);③ **`N skipped` 及其原因**
-——skipped 是「没测」不是「满分」,不写出来就是把 7 维体检报成全面体检;
-④ `blocking[]`(短路/重叠/出板框)必须是 0,非 0 就停在失败数据别宣称完成。
-`degraded` 维(compact / rf 恒为 degraded)要连同降级理由一起报,别把近似当实测。
-
-**收尾回流(块库共建)**:若本板含**手工搭建且已跑通 `sch check` + DRC=0 / 网表逐网核实**的标准外围(库里没有的),
-按 `references/standard-blocks-contributing.md` 顺手回流一个块(署名 + `validated` = 本次证据)——验证刚过正是入库时机,
-**一次设计同时是一次贡献**。
+常用辅助脚本：`scripts/lint.sh`、`bom-enrich.py`、`parts-select.py`、`parts-add.py`、
+`blocks-pin-audit.py`、`tests/run.py`。按对应参考使用；具体参数先看脚本 `--help`。

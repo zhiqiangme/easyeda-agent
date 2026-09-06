@@ -11,8 +11,10 @@ HAND-wiring, which bypasses the block's own pin references entirely.
 
 Two modes:
 
-  --probe    Place every part the library references (needs a live EasyEDA window)
-             and read its real pins back, refreshing the pin table snapshot.
+  --probe --project <scratch-project> --doc <scratch-page> --allow-clear
+             Place every part the library references on one dedicated page.
+             Read real pins back and refresh the pin table snapshot.
+             This explicitly clears that page; it does not create a scratch page.
              Resumable: re-run after a connection hiccup and it continues.
   (default)  Offline: judge every block pin reference against the snapshot.
              Exits non-zero if any reference is FANOUT or MISSING, so it gates.
@@ -25,7 +27,7 @@ Verdicts:
   missing  no pin matches — the name is simply wrong; real candidates are shown
   unknown  that part has no probed pins yet (unmeasured, not a defect)
 """
-import argparse, difflib, json, os, subprocess, sys
+import argparse, difflib, json, os, shutil, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
@@ -35,14 +37,62 @@ SNAPSHOT = os.path.join(HERE, '..', 'references', 'symbol-pins.json')
 FANOUT = '*'
 
 
+def read_json(path):
+    with open(path, encoding='utf-8') as stream:
+        return json.load(stream)
+
+
+def cli_binary():
+    explicit = os.environ.get('EASYEDA_BIN')
+    if explicit:
+        resolved = shutil.which(explicit)
+        if not resolved:
+            raise RuntimeError(f'EASYEDA_BIN is not an executable: {explicit}')
+        return resolved
+    resolved = shutil.which('easyeda')
+    if resolved:
+        return resolved
+    fallback = os.path.join(REPO, 'bin', 'easyeda')
+    if os.path.isfile(os.path.join(REPO, 'go.mod')) and os.access(fallback, os.X_OK):
+        return fallback
+    raise RuntimeError('easyeda CLI not found: install it on PATH or set EASYEDA_BIN=/absolute/path/to/easyeda')
+
+
+def load_blocks():
+    # Repository contributors audit their edited source. Installed skills use
+    # the same data embedded in the CLI; ls is only a projection, so fetch show.
+    if os.path.isdir(BLOCKS):
+        return [read_json(os.path.join(BLOCKS, name))
+                for name in sorted(os.listdir(BLOCKS))
+                if name.endswith('.json') and not name.startswith('_')]
+    binary = cli_binary()
+    def query(args):
+        proc = subprocess.run([binary, 'blocks'] + args, capture_output=True,
+                              encoding='utf-8', errors='replace', timeout=30)
+        if proc.returncode:
+            raise RuntimeError(f'embedded block lookup failed: {proc.stderr.strip() or proc.stdout.strip()}')
+        return json.loads(proc.stdout)
+    listing = query(['ls', '--json'])
+    if not isinstance(listing, list) or not listing:
+        raise RuntimeError('embedded block list is missing or empty; update the easyeda CLI')
+    blocks = []
+    for item in listing:
+        if not isinstance(item, dict) or not isinstance(item.get('id'), str) or not item['id']:
+            raise RuntimeError('embedded block list has an invalid identity')
+        block = query(['show', item['id']])
+        if not isinstance(block, dict) or block.get('id') != item['id']:
+            raise RuntimeError(f'embedded block detail identity mismatch: {item["id"]}')
+        blocks.append(block)
+    return blocks
+
+
 def load_refs():
     """Extract (role, pin, part_key) for every internal_nets member of every block."""
     refs, parts = {}, set()
-    for fname in sorted(os.listdir(BLOCKS)):
-        if not fname.endswith('.json') or fname.startswith('_'):
-            continue
-        b = json.load(open(os.path.join(BLOCKS, fname)))
-        bid = b.get('id') or fname
+    for b in load_blocks():
+        bid = b.get('id')
+        if not bid:
+            raise RuntimeError('block has no id')
         roles = {r: (v.get('part') if isinstance(v, dict) else None)
                  for r, v in (b.get('parts') or {}).items()}
         nets = b.get('internal_nets')
@@ -78,15 +128,17 @@ def load_refs():
     return refs, sorted(parts)
 
 
-def probe(project):
+def probe(project, doc, allow_clear=False):
     """Place each referenced part once and read its real pins. Resumable."""
-    std = json.load(open(STDPARTS))
+    if not project or not doc or not allow_clear:
+        raise RuntimeError('--probe requires explicit --project, --doc and --allow-clear for a dedicated measurement page')
+    std = read_json(STDPARTS)
     lib, parts = std['libraryUuid'], std['parts']
     _, wanted_all = load_refs()
 
     table = {}
     if os.path.exists(SNAPSHOT):
-        table = json.load(open(SNAPSHOT)).get('parts', {})
+        table = read_json(SNAPSHOT).get('parts', {})
         print(f'resuming from snapshot: {len(table)} part(s) already probed')
 
     skipped = [p for p in wanted_all if p not in parts or not parts[p].get('deviceUuid')]
@@ -96,15 +148,32 @@ def probe(project):
     wanted = [p for p in wanted_all
               if p in parts and parts[p].get('deviceUuid') and p not in table]
     print(f'to probe: {len(wanted)}')
+    if not wanted:
+        print('nothing to probe; page unchanged')
+        return
+    if not os.access(SNAPSHOT if os.path.exists(SNAPSHOT) else os.path.dirname(SNAPSHOT), os.W_OK):
+        raise RuntimeError(f'pin snapshot is not writable: {SNAPSHOT}; no page was changed')
+    binary = cli_binary()
 
     def run(args, timeout=180):
-        return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run([binary] + args[1:] + ['--doc', doc], capture_output=True,
+                              encoding='utf-8', errors='replace', timeout=timeout)
+
+    def must_run(args):
+        result = run(args)
+        try:
+            ok = json.loads(result.stdout).get('ok') is True
+        except (ValueError, AttributeError):
+            ok = False
+        if result.returncode or not ok:
+            raise RuntimeError(f'{" ".join(args[1:3])} failed on {project}/{doc}; probe stopped: '
+                               f'{result.stderr.strip() or result.stdout.strip()}')
 
     BATCH = 12  # a small page keeps the pin read fast and the clear reliable
     for start in range(0, len(wanted), BATCH):
         chunk = wanted[start:start + BATCH]
-        run(['easyeda', 'sch', 'clear', '--project', project])
-        run(['easyeda', 'sch', 'save', '--project', project])
+        must_run(['easyeda', 'sch', 'clear', '--project', project])
+        must_run(['easyeda', 'sch', 'save', '--project', project])
 
         placed = {}
         for i, pk in enumerate(chunk):
@@ -140,13 +209,14 @@ def probe(project):
             if c:
                 table[pk] = [{'n': p.get('pinNumber'), 'name': p.get('pinName')}
                              for p in (c.get('pins') or [])]
-        json.dump({'_doc': 'Real symbol pins, read back from placed parts. Refresh with '
-                           'blocks-pin-audit.py --probe (needs a live EasyEDA window).',
-                   'parts': table}, open(SNAPSHOT, 'w'), ensure_ascii=False, indent=1)
+        with open(SNAPSHOT, 'w', encoding='utf-8') as stream:
+            json.dump({'_doc': 'Real symbol pins, read back from placed parts. Refresh on a dedicated page with '
+                               'blocks-pin-audit.py --probe --project <scratch> --doc <page> --allow-clear.',
+                       'parts': table}, stream, ensure_ascii=False, indent=1)
         print(f'  batch {start}-{start + len(chunk)}: {len(placed)} probed')
 
-    run(['easyeda', 'sch', 'clear', '--project', project])
-    run(['easyeda', 'sch', 'save', '--project', project])
+    must_run(['easyeda', 'sch', 'clear', '--project', project])
+    must_run(['easyeda', 'sch', 'save', '--project', project])
     print(f'snapshot: {len(table)} part(s) → {SNAPSHOT}')
 
 
@@ -154,7 +224,7 @@ def audit():
     if not os.path.exists(SNAPSHOT):
         print(f'no pin snapshot at {SNAPSHOT} — run with --probe first', file=sys.stderr)
         return 2
-    table = json.load(open(SNAPSHOT))['parts']
+    table = read_json(SNAPSHOT)['parts']
     refs, _ = load_refs()
 
     def classify(pk, pin):
@@ -203,10 +273,15 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--probe', action='store_true',
-                    help='refresh the pin snapshot from a live EasyEDA window')
-    ap.add_argument('--project', default='ceshi', help='project to probe in (default: ceshi)')
+                    help='refresh pin snapshot on a dedicated page; requires --project --doc --allow-clear')
+    ap.add_argument('--project', help='explicit scratch project for --probe')
+    ap.add_argument('--doc', help='explicit dedicated schematic page for --probe (will be cleared)')
+    ap.add_argument('--allow-clear', action='store_true', help='authorize clearing the specified measurement page')
     a = ap.parse_args()
-    if a.probe:
-        probe(a.project)
-        sys.exit(0)
-    sys.exit(audit())
+    try:
+        if a.probe:
+            probe(a.project, a.doc, a.allow_clear)
+            sys.exit(0)
+        sys.exit(audit())
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+        ap.exit(2, f'blocks-pin-audit: {error}\n')

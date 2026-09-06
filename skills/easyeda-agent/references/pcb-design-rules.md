@@ -500,5 +500,5 @@ Bottom   — 信号 + 局部铺铜
 - [JLC SMT 设计指南](https://jlcpcb.com/help/article/smt-assembly-design-guidelines)
 - IPC-2221B — Generic Standard on Printed Board Design
 - IPC-7351B — Land Pattern Standard
-- easyeda-agent [net-class 规范](../skills/easyeda-agent/references/conventions.md)
-- easyeda-agent [设计流程](../skills/easyeda-agent/references/design-flow.md)
+- easyeda-agent [net-class 规范](pcb-layout-conventions.md)
+- easyeda-agent [设计流程](design-flow.md)

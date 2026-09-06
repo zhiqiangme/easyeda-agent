@@ -1,205 +1,97 @@
-# 贡献电路块 —— Standard Circuit Blocks 共建指南
+# 贡献标准电路块
 
-`internal/blocks/data/`(repo 内,不随 skill 分发)是一个**社区共建、署名可追**的电路块库(**一块一文件**)。它把「固定
-模块的外设电路」(CH340 USB 串口、ESP32 自动下载、ESP32-S3 模组、按键去抖、USB-HUB、
-降压……)沉淀成**可直接照抄、只需重绑边界网络**的知识资产。
+标准块保存器件角色、固定内部拓扑、可重绑边界和布局约束。先用
+`easyeda blocks search <keyword>` 查已有块，`easyeda blocks show <id>` 读取完整 JSON；
+`blocks ls --json` 只提供摘要投影，不包含全部连接数据。
 
-> **一次学习贡献,永久收益。** 你抄通、验证过的一个块,合入后带着你的 GitHub @handle
-> 永久留在库里 —— 之后每一块板子的每一次复用,都是你这次贡献的收益。库会随器件、封装、
-> 版本演进持续更新,但**署名不删**。
+## 模板与 1.4 Lib 的边界
 
----
-
-## 一、一个「块」是什么
-
-块 = **固定内部拓扑** + **可重绑边界(ports)** + **器件角色** + **布局电气约束**。
-
-- **内部拓扑固定**:块内 part↔part 的连线永不变(零参数)。
-- **边界可重绑**:变的只是块对外的几根线接到主控哪个网络(改网络名,**不改引脚号**)。
-- **引脚一律用功能名**(`CH340.TXD`),不用引脚编号 —— 符号级稳定,复用零改号。
-- **同名多脚加 `*` 全并联**(`J.VBUS*` / `J.GND*` / `J.EP*`,#145):连接器天生同一功能占多脚
-  —— USB-C 16P 有 2×VBUS、2×GND、4×EP,排针/屏蔽壳同理。**光写功能名是歧义的**,`sch autoconnect`
-  会正确拒绝(它不该替你挑一个),曾因此让 `ch340c_usb_serial` 恒定漏连 5V 少 2 pin、GND 少 6 pin
-  ——**VBUS 根本没接上,USB 口实际不供电**,而块还标着 verified。星号是块把「这几脚全并到这个网」
-  说出口的方式(USB-C 双取向本就**要求** A/B 两侧都接),而不是让 planner 按网络 kind 去猜。
-  **对单脚是恒等**(展开成 1 条),所以电源/地/屏蔽脚可以放心加星,不必先知道器件有几个同名脚。
-- **器件指回 `standard-parts.json`**:块不重复存 LCSC C 号,料号单一来源。
-
-字段完整定义见 `internal/blocks/data/_block.schema.json`(注意不是 `_schema.json`,那是共享 _doc/libraryUuid)。核心段:`parts` / `internal_nets`
-/ `ports` / `schematic_notes`(原理图链接注意)/ 元信息,外加一族**可拓展的约束 map**:
-
-- `schematic_layout` —— **原理图摆放模板**,两种**互斥**形态:
-
-  **① 关系形态(推荐,issue #180)** —— 只说**意图**,坐标由布局求解器算:
-  ```json
-  "schematic_layout": {
-    "flow":   ["J_USB", "D_ESD", "U"],          // 信号流左→右;不必覆盖全部 role
-    "attach": { "C_VCC": "U.VCC" },              // 角色 → 目标.引脚(去耦贴电源脚)
-    "pair":   [["R_CC1", "R_CC2"]],              // 等距并列组(组内必须同 part)
-    "anchor": "U",                               // 可选;缺省取被 attach 指向最多者
-    "orient": { "C_VCC": "vertical" }            // 可选;只说竖/横,不说角度
-  }
-  ```
-  **不要手算坐标。** 块作者写模板时根本不知道实例最终落在页面哪里、旁边有什么、
-  图纸多大、分区标题带在哪 —— 那些信息只有落地时才有。2026-08-13 手算模板同一轮
-  就踩了三个坑:负偏移把件推出图纸左界、块太高顶出上界、去耦电容顶到分区标题带。
-  校验(`go test ./internal/blocks/`,非零退出可 gate)会查:role 必须存在、一个 role
-  只能被一种关系定位、`attach` 目标必须是 `ROLE.PIN` 且**不许带 `*`**(要的是一个点)、
-  **`attach` 必须有电气依据**(`internal_nets` 里存在同时连着目标引脚与该角色任一脚的网
-  —— 这条抓拼写错和「贴到一个跟自己没关系的脚上」)、`pair` 组内同 part。
-  `make blocks-audit` 另外把 `attach` 的引脚名拿去和**真实符号引脚表**对账。
-
-  **`attach` 的引脚名同时决定分区粒度(2026-08-20)**:`block-apply` 落块后按**功能子群**
-  登记虚拟组 —— 有 `flow` 时按信号流每一级分,**没有 `flow` 时按 `attach` 的目标引脚**分
-  (「贴同一个脚的件 = 一个功能单元」),锚件自成一群、其余群名取 `ROLE_PIN`
-  (`U_3V3` / `U_EN` / `U_IO0`)。所以**别把所有去耦都挂到同一个脚上凑数**:
-  `esp32s3_wroom1_module` 正是因为 `C_VDD`/`C_BULK`→`U.3V3`、`R_EN`/`C_EN`→`U.EN`、
-  `R_IO0`→`U.IO0` 各归各脚,才能拆成四个排得下的区;若全写成 `U.3V3`,整块会糊成一个
-  507×712 的大框(A4 独占一页也放不下)。反过来,**件少的小块不会被拆**(阈值:
-  ≥4 件贴脚且 ≥2 个不同的脚),不用为了「拆得细」硬编关系。
-
-  **② legacy 绝对偏移(已废弃,仍受支持)** —— `{roles: {<ROLE>: {dx,dy,rotation}}}`:
-  相对块原点(`--at`)的偏移+朝向,y-UP(`+dy` 向上),**dx/dy 必须落 5 格**、rotation 限
-  0/90/180/270、**必须覆盖块内全部 role**(与关系形态相反:那边 `flow` 不必全覆盖)。
-  新块不要再写这种。
-
-  两种形态**同时声明是数据错误**(会给同一个件两个种子点)。审美约定不变:信号流左入
-  右出、电源上 GND 下、去耦贴主芯片电源脚。**当前状态**:关系数据已可入库并受校验,
-  但求解器是下一步 —— `sch block-apply` 会在 manifest 的 `NOT applied` 里如实列出
-  `schematic_layout.flow/attach/pair`,此期间几何仍走 legacy 模板或 fallback 网格。
-- `pcb_layout` —— 通用布局规则(列表 `{rule,target,constraint,value,severity}`)。
-- `placement` —— **结构件摆放**(按 `<ROLE>` 键):连接器/端子/USB/天线/按键/指示灯等
-  **要不要靠板边、靠哪条边(`edge`)、放哪个铜面(`side` top/bottom)**、朝向。
-- `signals` —— **信号特性**(按信号组键):差分对/高速/RF/敏感网络的阻抗、等长、隔离等
-  (如 USB D± 90Ω 差分、RS-485 A/B 120Ω、RF 50Ω)。
-- **加新维度 = 加一张新顶层 map**(如将来 `thermal`/`emc`),同样按 role/net/signal 键、
-  每条带 `severity`+`reason`。loader 前向兼容透传,未知 map 不报错;`go test` 校验已知 map。
-
----
-
-## 二、文件结构(一块一文件)
-
-```
-internal/blocks/data/
-  _schema.json                   # 共享 _doc / _schema / libraryUuid(下划线开头 = 非块)
-  ch340c_usb_serial.json         # 一块一文件,文件名 = block.id 去掉 block. 前缀
-  esp32_autodownload.json
-  esp32s3_wroom1_module.json
-```
-
-- **文件名 = `id` 去掉 `block.`**:`ch340c_usb_serial.json` ↔ `"id":"block.ch340c_usb_serial"`。
-  `go test ./internal/blocks/` 强校验这个约定。
-- **为什么一块一文件**:社区模型是**一块一 PR**,文件边界切到块 = **零合并冲突** +
-  **一文件一作者的干净 git-blame 署名**。`category` 只是**字段**(`easyeda blocks ls --category` 过滤),不做目录边界。
-- **`internal/blocks`(go:embed)是唯一 loader 接缝**:它把 `data/` 编进 `easyeda`
-  二进制,跳过 `_` 开头的文件、把所有块组装成库。使用方(agent 走 `easyeda blocks`、
-  将来的 `sch block apply`)不感知库是多文件、也不必有 skill 文件——离线自包含。
-- **加新块 = 加一个新 `<id>.json` 文件**,不动别人的文件。
-
----
-
-## 三、贡献门槛(硬标准 —— 达不到 PR 不合入)
-
-1. **拓扑必须来自可信源,不凭记忆手写。** `source` 必填,取自:
-   - 官方参考设计(`official-ref:<vendor>`)/ 器件手册应用电路(`datasheet:<mpn>`)
-   - **验证过的开源板**(`oshwhub:<url>` —— 见 skill 的 oshwhub 抄图训练闭环)
-2. **必须跑过一次全流程验证,`validated` 才能填、块才能标为「已入库」。**
-   验证 = 在真实工程(用 `ceshi`)跑 `place → wire → sch check → DRC = 0`,并**读回网表逐网核实合并**,
-   `validated` 记成 `ceshi <date> by @you: place→wire→check→DRC=0 + netlist proof`。
-   ⚠️ **先跑 `make blocks-audit`**(离线,不用连编辑器):把块每条引脚引用对**真实符号引脚表**
-   逐条判定,`FANOUT`=该加 `*`、`MISSING`=名字根本不存在(附真实候选名)。全库首次审出
-   **14 个块 41 处错**(739 条引用里 14 fanout + 27 错名),全是 ready 状态的块。
-   换了器件/新块进库后用 `--probe` 刷新引脚表快照(`references/symbol-pins.json`,需连编辑器)。
-   ⚠️ **验证必须由 `sch block-apply` 端到端产生,不能手工连线代替(#145 教训)。**
-   手工连线是照着拓扑**用眼睛**连的,会绕过块自己的引脚引用,块数据里的错(引脚名歧义/错名/
-   漏脚)因此全被掩盖 —— `ch340c_usb_serial` 就这样带着「VBUS 根本没接上」的缺陷挂了
-   `verified` 十几天,直到首次用 `block-apply` 跑才现形。**手工验过的只能证明电路对,
-   证明不了块数据对。**
-   未验证的块允许提交但标 draft(`validated: null`):可带一份**来自官方 ref 的候选 `internal_nets`**
-   (脚名待 `sch read` 核实),拓扑本身还没定就把 `internal_nets` 写成字符串 `"pending"`。
-3. **器件先入 `standard-parts.json` 再进块。** 块里用到的新料,先补器件库(带真实 C 号),
-   `parts.<ROLE>.part` 指向那个 role key。不允许块内内联裸料号。
-4. **引脚用功能名,不用编号。**
-5. **六段齐全,`pcb_layout` 必须是结构化规则**(`{rule,target,constraint,value,severity}`),
-   不写成散文 —— 将来要喂给 `pcb check` 做块级布局校验。
-6. **一块一个 PR。** 便于 review、便于署名、便于回滚。
-
----
-
-## 四、署名与版本
-
-| 字段 | 规则 |
+| 数据 | 用途与入口 |
 |---|---|
-| `author` | 首个贡献者的 GitHub @handle,**永不删除** |
-| `contributors` | 后续修正/更新者的 @handle,追加不覆盖 |
-| `added` | 首次入库的版本号(如 `v0.6.0`) |
-| `updated` | 最后一次改动的版本号(器件/拓扑/规则变更时 bump) |
+| CLI 内嵌 block 模板 | 仓库 `internal/blocks/data/` 一块一文件，经 `go:embed` 编进 CLI，不随 Skill 分发。`sch block-apply <id>` 解析角色、分配位号、放件并连接内部网与边界。 |
+| 本地 Lib composition | 已确定的连接核心加已设计、实测的局部几何，经 `sch compose` 计算模块平移、单页 Z 字排版及框标题，再生成受保护 `sch apply` 队列。格式见 [schematic-data.md](schematic-data.md)。 |
 
-- **修别人的块**:把自己加进 `contributors`,更新 `updated`,`author` 保持不动。
-- **器件停产/换封装**:更新 `parts`(优先用 `alt` 提供等价替代),bump `updated`,
-  在 PR 说明里写清替换原因。
+模板的 `parts.<ROLE>` 与实例的稳定 component ID、ref、role 属于不同层，模板 JSON
+不能直接作为 composition 输入。`block-apply` 每次创建新实例，并非幂等修复命令；
+部分失败后先回读现场，不能直接重跑。两条路径都不等于从任意拓扑自动设计全部外围与布局。
 
----
+## 贡献数据合同
 
-## 五、PR checklist(贴进 PR 描述)
+文件名为 `internal/blocks/data/<id 去掉 block.>.json`。完整字段说明在仓库
+`internal/blocks/data/_block.schema.json`，实际校验由 `internal/blocks/validate.go` 执行。
 
+| 字段 | 要求 |
+|---|---|
+| `id/desc/category/source/author` | `id` 形如 `block.usb_serial`；说明用途、分类、可追溯来源与原作者。来源使用具体型号手册、官方参考设计或有验证证据的开源电路。 |
+| `parts` | 非空角色表，值含 `part/qty`，可附 `alt/value_override/note`。`part` 指向 [standard-parts.json](standard-parts.json) 的 key；新器件先补库身份与真实料号。 |
+| `internal_nets` | 数组，每个网络是至少两个 `ROLE.PIN` 或 `PORT:<name>` 引用。同一引脚只属一个网。未定拓扑不写成字符串 `"pending"`，草稿也须满足数据格式。 |
+| `ports` | 边界表，含 `dir`（`in/out/bidir`）、`at`（`ROLE.PIN`）、`desc`，可附 `default_net`。重绑边界网络不改变内部引脚拓扑。 |
+| 可选约束 | `schematic_layout/pcb_layout/placement/signals/silk/keepout` 等按 schema 记录。存在字段不代表转换器已经执行该约束。 |
+
+引脚引用必须与实际所选符号核对，优先使用功能名；需要区分同名脚时使用真实引脚号。
+同名多脚确需全部并联时写 `J.VBUS*`，不能省略后缀并让工具猜选一脚。
+物理引脚逐脚验证；明确 NC 与缺失连接分开记录。`schematic_notes` 是模板知识说明，
+不表示 1.4 要生成独立 Notes 图元。
+
+## 布局提示的执行范围
+
+`schematic_layout` 有两种互斥形式，新模板优先使用关系形式：
+
+```json
+{
+  "schematic_layout": {
+    "anchor": "U",
+    "flow": ["J_USB", "D_ESD", "U"],
+    "attach": {"C_VCC": "U.VCC"},
+    "pair": [["R_CC1", "R_CC2"]],
+    "orient": {"C_VCC": "vertical"}
+  }
+}
 ```
-- [ ] 新块是 internal/blocks/data/<id>.json 一个新文件,文件名 = id 去掉 block. 前缀
-- [ ] source 填了,且是官方 ref / datasheet / 验证过的开源板(非凭记忆)
-- [ ] 用到的新器件已进 standard-parts.json(带真实 LCSC C 号)
-- [ ] 引脚全部用功能名,不含引脚编号(并在验证时用 sch read 核实真实符号脚名)
-- [ ] 核心段齐全;pcb_layout 结构化(每条带 severity)
-- [ ] 有结构件(连接器/端子/天线/按键/指示灯)的块填了 `placement`(板边+正反面)
-- [ ] 有差分/高速/RF 网络的块填了 `signals`(阻抗/等长/隔离)
-- [ ] 已在 ceshi 跑过 place→wire→sch check→DRC=0,validated 已填(或明确标 draft)
-- [ ] author/added/updated 已填;改他人块时把自己加进 contributors
-- [ ] 一个 PR 只含一个块
-- [ ] `go test ./internal/blocks/` 通过(校验 文件名↔id + 署名 + parts 交叉引用;跟着 `make test`/CI 跑)
+
+- `flow` 表示左到右顺序，不要求覆盖全部角色；一个角色不能被多种关系重复定位。
+- `attach` 定位到一个真实、唯一的目标引脚，不能带 `*`；该引脚与所附角色必须有
+  `internal_nets` 电气依据。`pair` 组内须为相同 part，`orient` 用 `vertical/horizontal`。
+- 兼容的 legacy `roles:{ROLE:{dx,dy,rotation}}` 使用相对块原点偏移，y 向上；
+  dx/dy 落 5 raw 网格、rotation 为 0/90/180/270，并覆盖全部角色。不能与关系形式混用。
+
+`block-apply` 已有关系求解：先放锚件，读取引脚与边界，再计算其余位置；放件后用真实
+bbox 扩展避让，并在接线前检查几何。关系被跳过或约束未执行时，manifest 会列入
+`NOT applied`，同时检查 warnings；不能把成功退出解释为所有原理图与 PCB 约束均已落实。
+1.4 composition 则消费明确的局部几何，不会自动旋转、缩放符号或迁移分页。
+
+## 验证与成熟度
+
+在开发仓库先运行 `go test ./internal/blocks/` 和 `make blocks-audit`。
+安装态可在 Skill 根目录运行 `python3 scripts/blocks-pin-audit.py`：默认离线，
+无源码目录时从 CLI 内嵌库逐项取完整模板，不操作编辑器。
+
+新增器件需要测量引脚时，使用专用空白测量页：
+
+```bash
+python3 scripts/blocks-pin-audit.py --probe \
+  --project <scratch-project> --doc <scratch-page> --allow-clear
 ```
 
----
+`--probe` 会清空指定页、放件、读脚、再清页，所有操作固定同一工程和页；它不会自动建页。
+必须已获准清空该测量页。清页或保存失败即停止，无待测器件时不清页。
+结果写入 `references/symbol-pins.json`，该文件需可写；这不是仅更新本地缓存的只读操作。
 
-## 六、上手最快的路径
+验证模板必须实际通过 `sch block-apply` 生成电路，保存 manifest，回读全部 pin→net/NC，
+检查几何并运行原理图检查、显式保存。手工接线只能证明电路，不能证明模板引用与转换正确。
+DRC fatal、WARN、INFO 分开报告；块级验证不等于从客户需求到 PCB 的完整验收。
 
-照 skill 的 **oshwhub 抄图训练闭环**抄一块官方开源板:抄的过程本身就产出一个**已验证**
-的块 —— 网表机械对照通过 + DRC=0,顺手加一个 `internal/blocks/data/<id>.json`,一次训练
-同时是一次贡献。这是本库最推荐的贡献来源。
+新块和修订使用 `verification` 分别记录 `schematic/component_selection/pcb_drc/bringup`。
+每项 status 为 `passed/failed/pending/not_tested`，`passed` 必须有 evidence；失败项附 issues。
+只有四项均通过才能设 `production_ready:true`。旧 `validated` 是兼容字段，不能据此跳过
+独立阶段的证据。未完成验证可以贡献草稿，但不能声称已生产验证。
 
----
+## 作者、版本与提交
 
-## 七、GitHub Issue 反馈闭环(查 → 报 → 登记)
+保留原 `author`；修订者追加到 `contributors`。`added` 记录首次版本，`updated` 记录最近
+修改版本；使用 `schema_version/revision` 时一并维护。替换器件须核对引脚、封装、参数及
+内部网络，不能只换器件库 key。
 
-块库的反馈**不走任何自动上传** —— 一切经用户确认、以公开 issue 的形式进入仓库。
-没有遥测:**无人反馈的块默认就处于「正常参考」阶段**,沉默不是异常。
-
-### Agent 的三条纪律
-
-1. **必查**:手工连任何已知外围前先 `easyeda blocks search/show`(SKILL 铁律 8,原有)。
-2. **报缺陷**:块用出了问题(引脚名与 `sch read` 实测不符 / 拓扑错 / 器件停产 / 约束错),
-   **起草**一份 `block-bug` issue(带证据:sch read 摘录、manifest、DRC 条目),
-   **征得用户同意后**再 `gh issue create` 提交。上报是外发动作,永远先给用户看草稿。
-3. **登记缺口**:`blocks search` 查不到需要的块时,把「需要什么、查过什么、期望边界」
-   起草成 `block-gap` issue,同样经用户确认后提交。设计工作照常继续(手工连线不被阻塞),
-   缺口登记是给库的需求地图,不是给用户设的门。
-
-用户自己做出一块好电路想投稿、又不方便提 PR 时,agent 可代为起草 `block-contribution`
-issue(块 JSON 草稿 + 一手来源 + 验证状态 + @handle 署名),经确认后提交,维护者代落库。
-
-三类模板在 `.github/ISSUE_TEMPLATE/`:`block-gap` / `block-bug` / `block-contribution`。
-
-### 维护者侧(仓库的策展权就是资产)
-
-- 分诊三类 label;能机械修的挂 `ready-for-agent` 交自动化(操作端边界见
-  operator 运行时验收约定:需要真机 DRC 验收的不挂,人工在实时会话处理)。
-- `block-bug` 确认后:修块、bump `updated`、上报人进 `contributors` 署名。
-- `block-gap` 聚成需求地图,决定下一批块的优先级。
-- `block-contribution` 按第三节硬标准审:一手来源必查,验证状态如实标(draft 也收)。
-
-### 块的生命周期(由 issue 驱动,不由遥测驱动)
-
-```
-draft(拓扑有一手源,脚名未核实)
-  → ready(整板验证 + netlist 核实 —— 自己验的或 issue 带证据反馈的)
-  → 正常参考(默认态:无人反馈 = 没出问题)
-  → block-bug issue → 修订 → bump updated → 回到正常参考
-```
+提交按块组织，说明来源、器件或拓扑差异、自动生成证据、验证结果及未测项目。
+缺陷反馈带具体模板 ID、版本、真实引脚与 manifest 摘录；发布 issue/PR 沿用用户已有授权。
+未获外发授权时先准备可审阅内容，不阻塞本地修复与验证。
