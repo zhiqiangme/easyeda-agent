@@ -424,3 +424,5 @@ When a needed operation has no typed action:
 2. Otherwise state the missing action name and expected inputs/outputs.
 3. Use `debug.exec_js` (raw `eda.*` JavaScript) only as a temporary, user-confirmed debug escape hatch. Its result must be JSON-serializable — base64-encode any `Blob`/`File` inside the snippet.
 4. Recommend promoting repeated debug code into a typed action.
+
+`sch connectivity --all-pages` 逐页激活读取并恢复起始页；跨页同 ID 的网络须定义一致才能合并，冲突直接报错。多页快照的 documentId 为空，每个器件保留 pageId，不能当单页 Apply 输入。
