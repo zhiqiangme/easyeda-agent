@@ -69,9 +69,10 @@ type playbookStep struct {
 
 	Notify string `json:"notify,omitempty"`
 
-	Capture map[string]string `json:"capture,omitempty"`
-	Assert  map[string]string `json:"assert,omitempty"`
-	OnFail  string            `json:"onFail,omitempty"` // stop|continue|prompt
+	Capture         map[string]string          `json:"capture,omitempty"`
+	Assert          map[string]string          `json:"assert,omitempty"`
+	OnFail          string                     `json:"onFail,omitempty"` // stop|continue|prompt
+	ExpectSchematic *schematicStateExpectation `json:"expectSchematic,omitempty"`
 
 	stepPolicy
 	Confirm    *bool        `json:"confirm,omitempty"`
@@ -325,6 +326,9 @@ func preflight(pb *playbook, vars map[string]string) []string {
 		if s.OnFail != "" && s.OnFail != "stop" && s.OnFail != "continue" && s.OnFail != "prompt" {
 			errs = append(errs, fmt.Sprintf("step %s: invalid onFail %q", ref, s.OnFail))
 		}
+		if err := validateSchematicExpectationStep(s); err != nil {
+			errs = append(errs, fmt.Sprintf("step %s: %v", ref, err))
+		}
 		// static ${var} resolution: names must be file vars or a prior capture
 		for _, miss := range unresolvedVars(s, known) {
 			errs = append(errs, fmt.Sprintf("step %s: ${%s} is not a var and not captured by any earlier step", ref, miss))
@@ -354,6 +358,9 @@ func unresolvedVars(s *playbookStep, known map[string]bool) []string {
 	}
 	walk(s.Payload)
 	walk(s.Flags)
+	if s.ExpectSchematic != nil {
+		walk(s.ExpectSchematic.jsonValue())
+	}
 	for _, a := range s.Args {
 		walk(a)
 	}
@@ -872,6 +879,11 @@ func (r *applyRunner) execute() error {
 			}
 		}
 		fmt.Fprintf(r.stderr, "\n✗ step [%d/%d] %s failed: %v\n", i+1, len(r.pb.Steps), ref, execErr)
+		var stateErr *schematicExpectationError
+		if errors.As(execErr, &stateErr) {
+			fmt.Fprintf(r.stderr, "  expectSchematic is a mandatory gate — stopping; journal: %s\n", r.journalPath)
+			return fmt.Errorf("playbook stopped at step %s: %w", ref, execErr)
+		}
 		switch onFail {
 		case "continue":
 			fmt.Fprintf(r.stderr, "  onFail=continue — proceeding (step marked fail in journal)\n")
@@ -899,6 +911,9 @@ func (r *applyRunner) execute() error {
 
 // executeStep runs one step with retry/verify semantics and returns captured vars.
 func (r *applyRunner) executeStep(s *playbookStep, catalog map[string]protocol.ActionSpec) (map[string]string, error) {
+	if err := validateSchematicExpectationStep(s); err != nil {
+		return nil, &schematicExpectationError{err}
+	}
 	timeout, retry, _ := r.policy(s)
 	readOnly := r.isReadOnly(s, catalog)
 	// design §错误处理-2: default retries apply to read-only steps only; an
@@ -910,6 +925,16 @@ func (r *applyRunner) executeStep(s *playbookStep, catalog map[string]protocol.A
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		result, err := r.executeOnce(s, timeout)
+		if s.ExpectSchematic != nil {
+			// A read failure provides no evidence either. Never let verify or
+			// retry turn an absent or mismatched snapshot into a successful gate.
+			if err == nil {
+				err = s.ExpectSchematic.check(result, r.vars)
+			}
+			if err != nil {
+				return nil, &schematicExpectationError{err}
+			}
+		}
 		if err == nil {
 			captured, aerr := r.captureAndAssert(s.Capture, s.Assert, result)
 			if aerr == nil {

@@ -82,6 +82,23 @@ easyeda audit export --playbook > replay.json   # ★ 从真实会话的审计�
 **变量替换**:任何字符串值里的 `${NAME}`;未定义即该步硬错(`--dry-run` 预检能查出
 纯静态未定义;依赖 capture 的推迟到运行时)。**无条件分支、无循环**(见设计决策 1)。
 
+原理图计算与 Apply 使用 `expectSchematic` 校验真实回读，按位号/引脚编号匹配，
+不依赖返回数组顺序。仅允许用于 `schematic.components.list` 且 `includePins:true`：
+
+```json
+{"action":"schematic.components.list","payload":{"includePins":true},
+ "expectSchematic":{"exactParts":true,"parts":{
+   "C1":{"primitiveId":"${C1_PID}","x":400,"y":250,"rotation":90,"mirror":false,
+     "pins":{"1":{"x":400,"y":270,"net":"+3V3"},"2":{"x":400,"y":230,"net":"GND"}}}
+ }}}
+```
+
+每个器件必须列齐全部引脚；`exactParts:true` 同时拒绝额外器件（忽略 sheet、flags）。
+`primitiveId`、位置、旋转、镜像可省略，几何数值容差为 `1e-6`；省略 `net` 用于接线前的
+几何预检，最终验收应给每脚指定黄金网名。指定网名时，未知/null、空网名、错网均失败，
+显式 `net:null` 本身也无效。此守卫读回失败或比对失败直接终止并写 journal，
+`retry`、`verify`、`onFail:continue` 和 `continueOnError` 均不能绕过。
+
 ### journal 与断点续跑
 
 `<playbook>.journal.jsonl`,首行头 `{playbookSha256, startedAt, project}`,其后每步一行:
