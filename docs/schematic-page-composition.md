@@ -12,7 +12,7 @@ connectivity: 完整的 1.4 IR
 sheet: {minX, minY, maxX, maxY}
 keepouts: [{minX, minY, maxX, maxY}, ...]
 modules: [
-  {id, title, titleMetrics?, placements, wires, flags}, ...
+  {id, title, titleMetrics?, placements, wires, flags, terminals?}, ...
 ]
 ```
 
@@ -27,12 +27,22 @@ modules: [
 | `placements[]` | `designator/value/x/y/rotation/mirror/bbox/pins`。器件与引脚坐标落在 5 raw 网格；bbox 使用官方实测几何。`pins` 为完整的 `{number,name,net,x,y}` 数组，NC 引脚的 `net` 为空。旧 `primitiveId` 不作为新实例身份。 |
 | `wires[]` | `{net,points:[[x,y],...]}`；正交折线会拆成单段。网名用于本地校验，实际线树由相连的电源符号或网络端口命名。 |
 | `flags[]` | `{net,kind,pinX,pinY,direction,offset}`；`kind` 使用 `power/ground/net_port_in/net_port_out/net_port_bi`，方向为 `up/down/left/right`，偏移为正的网格长度。转换会生成真实引线。 |
+| `terminals[]` | 可选 `{designator,pin,direction,kind?}`；引用本模块的已测引脚，网名从连接核心读取，默认 `kind:net_port_bi`，也支持 `net_port_in/net_port_out/power/ground`。必须指定向器件外侧的方向，不能重复声明或与已有线/标记重复接线。 |
 | `titleMetrics` | 可选 `{title,fontSize,width,height}`，仅接受同标题、同字高的实测数据。没有实测时使用保守字宽预测，Apply 仍检查实际文字 bbox。 |
 
 连接模型见 [概念约定](concepts.md)，框与标题字段见
 [模块框转换](schematic-frame-conversion.md)。局部电路应先用真实引脚几何设计：
 外围电容、电阻直接连接核心器件，电源/地就近放标记，边界信号可用网络端口。
 每个有网络的引脚都必须经真实线段到达同名标记；在 JSON 导线中填写网名本身不构成连接。
+
+位号必须逐字匹配输入 `component.ref`，保持大小写、前导零、下划线等原有风格；
+不添加模块前缀、不重新编号，不为消除 DRC 位号格式 INFO 改名。器件和 Lib 成员按
+声明顺序传递；`group create --if-absent` 按精确位号集合判幂等，换序不重写已有登记。
+
+端子直出在框计算之前完成：从 10 raw 起按 5 raw 增长，选最短合法直线，最长
+300 raw。标记本体和文字保留 5 raw 净距；检查全部器件、引脚、已有线段和标记。
+邻脚标签采用错落线长避免重叠，不生成折线回退。不能直出时先调整源数据中的
+器件位置/朝向；规划器不会擅自旋转器件、重连网络或删除已有线路。
 
 ## 排版与固定贴边尺寸
 

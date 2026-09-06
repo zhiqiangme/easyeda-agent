@@ -84,6 +84,50 @@ func TestComposeFixedMarginsAndEqualHeightZRows(t *testing.T) {
 	}
 }
 
+func TestComposeTerminalDeclarationsCompileToGuardedStraightLeads(t *testing.T) {
+	src := composeFixture(1)
+	src.Modules[0].Wires, src.Modules[0].Flags = nil, nil
+	src.Modules[0].Terminals = []schCompositionTerminal{
+		{Designator: "U1", Pin: "1", Direction: "left", Kind: "power"},
+		{Designator: "U1", Pin: "2", Direction: "right", Kind: "ground"},
+	}
+	before, _ := json.Marshal(src)
+	p, err := planSchComposition(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _ := json.Marshal(src)
+	if string(before) != string(after) || !reflect.DeepEqual(src.Connectivity.Connections, p.Connectivity.Connections) {
+		t.Fatal("terminal routing changed source data or canonical connections")
+	}
+	if len(p.Layout.Wires) != 0 || len(p.Layout.Flags) != 2 {
+		t.Fatalf("terminal routing must emit only two straight marker leads: %+v", p.Layout)
+	}
+	for i, f := range p.Layout.Flags {
+		pin := p.Layout.Placements[0].Pins[i]
+		if f.PinX != pin.X || f.PinY != pin.Y || f.Net != pin.Net || f.Offset < 10 || f.Direction != src.Modules[0].Terminals[i].Direction {
+			t.Fatalf("generated lead lost measured pin geometry/net: %+v", f)
+		}
+	}
+	live := map[string]any{"context": map[string]any{"projectUuid": p.Connectivity.ProjectID, "documentUuid": p.Connectivity.DocumentID}, "result": map[string]any{"components": []any{map[string]any{"componentType": "sheet", "primitiveId": "sheet", "bbox": p.Sheet}}, "wires": []any{}, "count": 1, "connectivitySummary": map[string]any{"scope": "activePage", "wires": 0, "buses": 0, "shortSymbols": 0}}}
+	pb, err := schCompositionPlaybook(p, composeApplyBytes(t, live), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, step := range pb.Steps {
+		if step.Action == "schematic.power.connect_pin" {
+			count++
+		}
+		if step.Action == "schematic.wire.create" {
+			t.Fatal("straight terminal declarations produced extra polyline wires")
+		}
+	}
+	if count != 2 || !pb.RequireFullExecution {
+		t.Fatalf("expected guarded queue with two real lead actions: count=%d", count)
+	}
+}
+
 func TestComposePreservesElectricalIdentityAndRigidModuleGeometry(t *testing.T) {
 	src := composeFixture(4)
 	before, _ := json.Marshal(src)

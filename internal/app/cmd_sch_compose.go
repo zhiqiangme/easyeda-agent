@@ -17,12 +17,13 @@ import (
 // Composition is a presentation layer over the canonical electrical IR. It
 // accepts authored/measured module geometry; it never guesses missing circuits.
 type schCompositionModule struct {
-	ID           string                 `json:"id"`
-	Title        string                 `json:"title"`
-	TitleMetrics *schTitleMetrics       `json:"titleMetrics,omitempty"`
-	Placements   []powerLayoutPlacement `json:"placements"`
-	Wires        []powerLayoutWire      `json:"wires"`
-	Flags        []powerLayoutFlag      `json:"flags"`
+	ID           string                   `json:"id"`
+	Title        string                   `json:"title"`
+	TitleMetrics *schTitleMetrics         `json:"titleMetrics,omitempty"`
+	Placements   []powerLayoutPlacement   `json:"placements"`
+	Wires        []powerLayoutWire        `json:"wires"`
+	Flags        []powerLayoutFlag        `json:"flags"`
+	Terminals    []schCompositionTerminal `json:"terminals,omitempty"`
 }
 type schCompositionSource struct {
 	SchemaVersion int                    `json:"schemaVersion"`
@@ -47,7 +48,9 @@ func newSchComposeCmd(stdout, stderr io.Writer) *cobra.Command {
 	var from, out, before, playbookOut string
 	var replace bool
 	c := &cobra.Command{Use: "compose", Short: "Compose authored Lib circuits onto one sheet and compile a guarded SCH Apply", Long: `Read schemaVersion:1 composition data containing connectivity (complete 1.4 IR),
-sheet, keepouts and ordered modules (id/title/placements/wires/flags).
+sheet, keepouts and ordered modules (id/title/placements/wires/flags/terminals).
+Optional terminals reference measured pins and generate shortest clear straight
+leads, staggering marker lengths without changing nets or designators.
 Plan compact frames and titles, then Z rows with fixed 0.1-inch margins/gaps.
 Preserve every pin-to-net and NC intent. No editor calls are made by this command.
 --playbook requires --before (fresh target components.list snapshot with hydrated
@@ -232,6 +235,9 @@ func planSchComposition(src schCompositionSource) (*schCompositionPlan, error) {
 			}
 		}
 		p.Wires = segments
+		if err := planSchCompositionTerminals(&p, m.Terminals); err != nil {
+			return nil, fmt.Errorf("module %s: %w", m.ID, err)
+		}
 		if err := validateSchCompositionNets(&p); err != nil {
 			return nil, fmt.Errorf("module %s: %w", m.ID, err)
 		}
