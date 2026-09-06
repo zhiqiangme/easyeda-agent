@@ -120,6 +120,7 @@ func Compare(a, b Document) Diff {
 type Component struct {
 	ID        string     `json:"id"`
 	Ref       string     `json:"ref"`
+	Role      string     `json:"role,omitempty"`
 	Device    Device     `json:"device"`
 	Footprint string     `json:"footprint,omitempty"`
 	Pins      []Pin      `json:"pins"`
@@ -234,6 +235,7 @@ func (d *Document) Validate() error {
 			}
 		}
 	}
+	d.refreshDesignatorIssues()
 	return nil
 }
 

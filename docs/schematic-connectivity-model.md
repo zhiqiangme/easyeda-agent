@@ -4,7 +4,7 @@
 
 ## Connectivity IR
 
-- `component`：实例 ID、位号、`libraryUuid`、`deviceUuid`、封装和属性；
+- `component`：稳定实例 `id`、显示位号 `ref`、可选功能 `role`、`libraryUuid`、`deviceUuid`、封装和属性；
 - `pin`：所属器件、pin number、名称、方向和电气类型；
 - `net`：项目内稳定 `netId`、规范名称、作用域和角色；1.4 快照会把电源/地识别为
   `scope=global`（`role=power|ground`），普通信号识别为 `scope=local`、
@@ -15,6 +15,17 @@
 - `module`：可复用 Lib 的核心器件、外围器件、内部网和对外端口。
 
 `primitiveId` 和几何数据属于布局层，不得成为连接依据。保存、导入 PCB、DRC 和回归测试均以 `pin_net` 对账。
+
+`id`、`ref`、`role` 的含义见[共享词汇表](concepts.md#器件身份位号与功能角色)。
+实例通过 `otherProperty["EasyEDA Agent Component ID"]` 保存 canonical ID，通过
+`otherProperty["EasyEDA Agent Role"]` 保存可选功能角色；重新导出优先读取绑定。
+未绑定的历史图兼容读取旧 `cmp-<ref>` ID，首次修正位号时先保存该 ID，之后不得
+因显示位号变化而重建它。原生 `uniqueId` 不作为可覆盖字段。
+
+历史非标准位号在 JSON 快照中产生 `nonstandard-designator` 诊断，仍允许读取和修复。
+`compose` 与 `materialize` 在生成放置队列前拒绝此类位号及未分配的 `?`，防止把
+功能名称再次写回画布。修复以全工程数据分配编号：按官方库前缀、已有数字占用和
+输入声明顺序，只修复非标准项；不得全量重新编号正常器件。
 
 ## Lib 复用
 

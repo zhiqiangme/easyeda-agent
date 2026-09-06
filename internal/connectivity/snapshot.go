@@ -26,6 +26,18 @@ func FromRead(m map[string]any) (Document, error) {
 		}
 		ref, _ := x["designator"].(string)
 		c := Component{ID: "cmp-" + ref, Ref: ref}
+		if properties, ok := x["otherProperty"].(map[string]any); ok {
+			if id, exists, err := componentBinding(properties, ComponentIDProperty); err != nil {
+				return d, fmt.Errorf("%s: %w", ref, err)
+			} else if exists {
+				c.ID = id
+			}
+			if role, _, err := componentBinding(properties, ComponentRoleProperty); err != nil {
+				return d, fmt.Errorf("%s: %w", ref, err)
+			} else {
+				c.Role = role
+			}
+		}
 		if dev, ok := x["device"].(map[string]any); ok {
 			c.Device = Device{LibraryUUID: stringField(dev, "libraryUuid"), UUID: stringField(dev, "uuid"), Name: stringField(dev, "name")}
 		}

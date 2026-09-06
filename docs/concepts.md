@@ -297,6 +297,18 @@ net ID、全量 verification、provenance 和复杂 PCB constraints；否则保�
 
 ---
 
+## 器件身份、位号与功能角色
+
+`component.id` 是连接图中的稳定、不透明实例 ID；`component.ref` 是图上显示的
+器件位号；`component.role` 是功能角色。三者不能相互推算：不能截取 ID 生成位号，
+也不能将 `RF_MCU`、`AUDIO_MODULE` 等功能名称写入位号。旧 ID 即使含有旧位号，
+修正显示位号时仍保持该 ID 不变。
+
+正常位号使用器件库默认前缀加数字。前缀取官方 device 的 `property.designator`，
+不能凭器件用途猜测端子一定是 `J`；实际库可能使用 `U?`、`CN?` 等前缀。
+已有合法数字位号保留原拼写、前导零和声明顺序。只为非标准名称或未编号占位符分配
+未占用数字，功能名称保留在 role。原生 `uniqueId` 保持不变，避免影响 PCB 关联。
+
 ## 四、可信判据(reliable oracles)——判对错只信这些
 
 | 判什么 | ✅ 唯一可信 | ❌ 不可信 |
