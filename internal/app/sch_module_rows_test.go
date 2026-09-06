@@ -55,7 +55,7 @@ func TestPowerLayoutDefaultStartsTopLeftWithoutChangingTopology(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if packed.Frames[0].Rect.MinX != 20 || packed.Frames[0].Rect.MaxY != 805 {
+	if packed.Frames[0].Rect.MinX != 10 || packed.Frames[0].Rect.MaxY != 815 {
 		t.Fatal("default module must start at A4 upper-left inset")
 	}
 	if !reflect.DeepEqual(original.ExpectedPinNets, packed.ExpectedPinNets) {

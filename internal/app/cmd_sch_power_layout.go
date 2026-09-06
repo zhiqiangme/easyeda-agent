@@ -410,7 +410,7 @@ func planPowerLayout(raw []byte, o powerLayoutOptions) (*powerLayoutPlan, error)
 	}
 	plan.Frames = []schFrameSpec{frame}
 	if o.At == nil && !o.PreservePosition {
-		packed, err := planSchModuleRows(plan.Frames, *sheet, 20, 20)
+		packed, err := planSchModuleRows(plan.Frames, *sheet, schModulePageMargin, schModuleGap)
 		if err != nil {
 			return nil, err
 		}

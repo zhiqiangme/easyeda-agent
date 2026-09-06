@@ -60,7 +60,8 @@ func schBoundsUnion(boxes []layoutBBox) layoutBBox {
 // otherwise grow only enough to fit. Height wins, then area, leftmost X, top.
 // Restrict horizontal expansion to that required by the title itself.
 func measureSchModuleFrameObstacles(id, title string, obstacles []layoutBBox, metrics *schTitleMetrics, sheet *layoutBBox) (schFrameSpec, error) {
-	const padding, inset, fontSize, clearance = 15.0, 10.0, 20.0, 5.0
+	const padding, inset = schModuleFramePadding, schModuleTitleInset
+	const fontSize, clearance = schModuleTitleFontSize, schModuleTitleClearance
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(title) == "" || strings.ContainsAny(title, "\r\n") || len(obstacles) == 0 {
 		return schFrameSpec{}, fmt.Errorf("module frame requires an id, single-line title and finite content bounds")
 	}
@@ -182,6 +183,14 @@ func powerLayoutContentObstacles(plan *powerLayoutPlan) []layoutBBox {
 		dx, dy := math.Max(15, plPowerTextWidth(f.Net)/2), 40.0
 		if f.Direction == "left" || f.Direction == "right" {
 			dx, dy = dy, dx
+		}
+		if isNetPortKind(f.Kind) {
+			// Netports have a hexagon followed by an external name. Their
+			// occupancy cannot use the compact power-flag text envelope.
+			dx, dy = acPortTotalLen(f.Net)+10, 12
+			if f.Direction == "up" || f.Direction == "down" {
+				dx, dy = dy, dx
+			}
 		}
 		boxes = append(boxes, layoutBBox{MinX: x - dx, MinY: y - dy, MaxX: x + dx, MaxY: y + dy})
 	}

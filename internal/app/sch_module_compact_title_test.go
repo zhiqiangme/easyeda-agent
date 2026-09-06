@@ -37,9 +37,9 @@ func TestCompactTitleUsesUpperLowerSilhouette(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			before := append([]layoutBBox(nil), tc.obstacles...)
 			f := compactTitleFrame(t, "M", tc.obstacles, 60, nil)
-			// Occupied height 140 plus two 15-unit margins. A title that fits
+			// Occupied height 140 plus two 10-unit margins. A title that fits
 			// beside the tall right-hand object must add no title-only band.
-			if f.Rect.MaxY-f.Rect.MinY != 170 {
+			if f.Rect.MaxY-f.Rect.MinY != 160 {
 				t.Fatalf("unused local gap increased height: %+v", f)
 			}
 			b := f.titleBounds()
@@ -55,15 +55,15 @@ func TestCompactTitleUsesUpperLowerSilhouette(t *testing.T) {
 
 func TestCompactTitleFullSilhouetteNeedsOnlyMinimumExtension(t *testing.T) {
 	f := compactTitleFrame(t, "M", []layoutBBox{{100, 100, 400, 240}}, 60, nil)
-	// 140 content + 15 opposite margin + 5 clearance + 20 text + 10
-	// title inset = 190, instead of reserving an additional fixed band.
-	if got := f.Rect.MaxY - f.Rect.MinY; got != 190 {
-		t.Fatalf("expected the minimum 190-unit height, got %g", got)
+	// 140 content + 10 opposite margin + 5 clearance + 20 text + 10
+	// title inset = 185, instead of reserving an additional fixed band.
+	if got := f.Rect.MaxY - f.Rect.MinY; got != 185 {
+		t.Fatalf("expected the minimum 185-unit height, got %g", got)
 	}
 	if f.TitleY != 265 || f.titleBounds().MinY != 245 {
 		t.Fatalf("equal upper/lower candidates should select the stable upper candidate: %+v", f)
 	}
-	if f.Rect.MaxX-f.Rect.MinX != 330 {
+	if f.Rect.MaxX-f.Rect.MinX != 320 {
 		t.Fatal("title unnecessarily widened the module")
 	}
 }
@@ -72,7 +72,7 @@ func TestCompactTitleFindsInteriorHorizontalGap(t *testing.T) {
 	obstacles := []layoutBBox{{100, 100, 150, 240}, {150, 100, 350, 160}, {350, 100, 400, 240}}
 	f := compactTitleFrame(t, "M", obstacles, 150, nil)
 	b := f.titleBounds()
-	if f.Rect.MaxY-f.Rect.MinY != 170 || b.MinX < 155 || b.MaxX > 345 || b.MinY >= 240 {
+	if f.Rect.MaxY-f.Rect.MinY != 160 || b.MinX < 155 || b.MaxX > 345 || b.MinY >= 240 {
 		t.Fatalf("missed the upper concavity between two towers: %+v", f)
 	}
 	// Input order carries no placement meaning: candidate tie breaks must be
@@ -228,7 +228,7 @@ func TestCompactTitleRowsTranslateOccupancyWithoutChangingSource(t *testing.T) {
 	}
 	for i, row := range rows {
 		f := row.Frame
-		if f.Rect.MaxY-f.Rect.MinY != 190 {
+		if f.Rect.MaxY-f.Rect.MinY != 185 {
 			t.Fatal("tight titles must still obey uniform row height")
 		}
 		if err := checkSchFrameTitleOccupancy(f, f.titleBounds()); err != nil {

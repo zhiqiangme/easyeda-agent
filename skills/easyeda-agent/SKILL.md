@@ -69,7 +69,7 @@ EasyEDA tooling.
 12. **禁用 `eda.sch_Netlist.getNetlist()`**(已废弃、悬空脚挂死)— 网表走 `sch read/check/netlist/export`;raw 路径不得已才 `getNetlistFile()` 读 `File.text()`。→ schematic.md / actions.md
 13. **电气 clearance ≠ 手焊可达性** — P2 先持久化装配档案:`pcb stage set-assembly --profile hand-solder`(默认/下限40mil;大焊盘烙铁通道60mil);`layout-lint --gate` 有任何 tight pair 即失败,任何器件四面被围、无一侧 ≥60mil 烙铁通道(no-access)也失败;未过门不得确认布局。→ design-flow P2/P6 · issue #99
 14. **阶段门禁机械强制,不必预读细则** — 布线前、布线后各一道门,未过一律被拒(daemon 在 /action 层也拦,raw 调用绕不过)。撞上去的拒绝消息**自带下一条该跑的命令**,照做即可。切入/恢复会话:`workflow status --reconcile` → `workflow advance`。→ design-flow P6(含 force 分级 #132)/P10
-15. **原理图按功能模块画框并标标题** — 默认先完成一页,分页需按功能另行设计。每个 Lib 的呈现数据包含虚线框和粉色标题,标题字高 **0.2 inch = 20 原理图坐标单位**。框包住核心器件、外围、导线和电源符号;先计算再 Apply 并回读。1.4 不提供独立 Notes 功能,不要求每模块说明。→ design-flow S1–S3
+15. **原理图按功能模块画框并标标题** — 默认先完成一页,分页需按功能另行设计。每个 Lib 的呈现数据包含虚线框和粉色标题,标题字高 **0.2 inch = 20 原理图坐标单位**。框包住核心器件、外围、导线和电源符号；页边/框内最小边距、模块间距与标题内缩统一10 raw（0.1 inch / 2.54 mm），标题净距5 raw；图签同样保留10 raw净距。先计算再 Apply 并回读。1.4 不提供独立 Notes 功能,不要求每模块说明。→ design-flow S1–S3
 16. **「探出图纸」≠「比图纸还大」** — 前者挪一挪能解;后者(`page-too-small`)挪多少次都没用,必须换手段,且**分页是设计决策 → 停手问用户**(工具不自动分页)。别人肉重试:`--max-attempts`(默认 3)会替你停手。→ design-flow S3
 17. **S0 先于任何放置** — spec 必须在首个 `page-new` / `place` / `block-apply` 前落盘并通过 `easyeda spec validate --strict`;先画后补只能算记录,不能证明设计决策已冻结。→ design-flow S0
 
