@@ -36,6 +36,8 @@ typed CLI 操作嘉立创EDA专业版的原理图——每个动作可观测、�
 
 | 能力 | 命令 | 说明 |
 |---|---|---|
+| 固定 LDO 数据规划 | `sch power-layout --from ... --out ... --playbook ...` | 实测几何→器件/引脚/线/电源符号/模块框;默认左上起排,共享 Z 字行布局使用统一行高;`--frames-only` 只验证并补框 |
+| 模块呈现转换 | `sch frame apply/check --from ...` | JSON→粉色虚线框+0.2 inch 标题;按页面和模块记录 ID,完整样式与渲染边界回读,重复 Apply 不增图元 |
 | 模块感知自动布局 | `sch autolayout` | 双引擎:`template`(spec 驱动,核心放分区中心+外围环绕,确定性,布线前用)/ `official`(平台 @beta 兜底,破坏性,`--rewire` 网表重建) |
 | 空隙打包 | `sch autoplace-free` | 无分区场景往空白处塞件 |
 | 对齐/等距 | `sch align` / `sch distribute` | 按渲染 bbox 对齐(left/right/top/…)/ 单轴等距摊开;默认 dry-run;选集**部分覆盖**持久组时硬拒绝(`--break-group` 显式放行) |
@@ -47,7 +49,7 @@ typed CLI 操作嘉立创EDA专业版的原理图——每个动作可观测、�
 | 组间叠加布局 | `sch zone tidy` | **Zone 层**:区内组当刚体排布(锚组+上下堆叠,hGap 默认 117 可调);装不下给最小尺寸诊断不硬塞;双认领图元差集(正/回滚对称);自检红逆序回滚 |
 | 布局质量分 | `sch layout-score` | **五维诊断**:标签折叠 / 标签反向(背离核心)/ 外围贴芯片距离 / 长链散乱 / 框贴合——逐项归因**带可执行 fix 命令**(AI 照抄即修);诊断视角,门仍是 layout-lint+check |
 
-### 4. 页面组织与分区(可读性三件套)
+### 4. 页面组织与分区
 
 | 能力 | 命令 | 说明 |
 |---|---|---|

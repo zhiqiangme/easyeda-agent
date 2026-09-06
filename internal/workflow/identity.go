@@ -238,6 +238,9 @@ func (s *State) PageKeys() []string {
 	for p := range s.SchZoneFrameIdsByPage {
 		set[p] = true
 	}
+	for p := range s.SchModuleFramesByPage {
+		set[p] = true
+	}
 	for p := range s.PageOwners {
 		set[p] = true
 	}
@@ -315,6 +318,7 @@ func (s *State) PageRecords(liveUUID string, livePages []string) []PageRecord {
 		if s.SchZoneFrameIdsByPage[p] != nil {
 			rec.Frames = 1
 		}
+		rec.Frames += s.SchModuleFrameCount(p)
 		switch {
 		case live == "" || rec.Owner == "":
 			rec.Verdict = "unknown"
@@ -408,6 +412,10 @@ func (s *State) PrunePages(pages []string) []string {
 		}
 		if _, ok := s.SchZoneFrameIdsByPage[p]; ok {
 			delete(s.SchZoneFrameIdsByPage, p)
+			hit = true
+		}
+		if _, ok := s.SchModuleFramesByPage[p]; ok {
+			delete(s.SchModuleFramesByPage, p)
 			hit = true
 		}
 		if _, ok := s.PageOwners[p]; ok {

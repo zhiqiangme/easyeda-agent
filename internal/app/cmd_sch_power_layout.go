@@ -17,10 +17,11 @@ import (
 // is measured geometry with authoritative (or explicitly preserved desired)
 // pin nets. It never infers connectivity from old wire positions.
 type powerLayoutOptions struct {
-	Core, InputCap string
-	OutputCaps     []string
-	Doc            string
-	At             *[2]float64
+	Core, InputCap   string
+	OutputCaps       []string
+	Doc              string
+	At               *[2]float64
+	PreservePosition bool
 }
 
 type powerLayoutPin struct {
@@ -64,7 +65,7 @@ type powerLayoutPlan struct {
 	Wires           []powerLayoutWire      `json:"wires"`
 	Flags           []powerLayoutFlag      `json:"flags"`
 	ExpectedPinNets map[string]string      `json:"expectedPinNets"`
-	Notes           []string               `json:"notes"`
+	Frames          []schFrameSpec         `json:"frames"`
 }
 
 type powerLayoutSnapshot struct {
@@ -94,6 +95,7 @@ type powerLayoutSnapshot struct {
 
 func newSchPowerLayoutCmd(stdout, stderr io.Writer) *cobra.Command {
 	var from, out, core, inputCap, outputCaps, doc, at, playbookOut string
+	var framesOnly bool
 	c := &cobra.Command{
 		Use:   "power-layout",
 		Short: "Plan a four-part fixed AMS1117 power circuit offline from measured geometry",
@@ -104,17 +106,23 @@ preserved desired pin nets. Supports exactly one AMS1117 and three capacitors.
 The calibrated core must have VIN on the left, pin 4 on the right, and GND
 below pin 2/VIN. No editor calls or mutations are performed. --out writes the
 layout plan; --playbook additionally writes the ordered sch apply operations
-with fresh geometry guards and post-apply pin/net verification.`,
+with fresh geometry guards and post-apply pin/net verification. Each plan also
+contains a dashed pink module frame and a 0.2-inch title. --frames-only compiles
+only frame/title conversion and verification; all planned pins and parts must
+already be in their target positions and on their expected nets.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if from == "" {
 				return fmt.Errorf("--from is required")
 			}
+			if framesOnly && playbookOut == "" {
+				return fmt.Errorf("--frames-only requires --playbook")
+			}
 			raw, err := os.ReadFile(from)
 			if err != nil {
 				return err
 			}
-			o := powerLayoutOptions{Core: core, InputCap: inputCap, OutputCaps: strings.Split(outputCaps, ","), Doc: doc}
+			o := powerLayoutOptions{Core: core, InputCap: inputCap, OutputCaps: strings.Split(outputCaps, ","), Doc: doc, PreservePosition: framesOnly}
 			if at != "" {
 				v := strings.Split(at, ",")
 				if len(v) != 2 {
@@ -134,7 +142,12 @@ with fresh geometry guards and post-apply pin/net verification.`,
 				return err
 			}
 			if playbookOut != "" {
-				pb, err := powerLayoutPlaybook(plan, raw)
+				var pb *playbook
+				if framesOnly {
+					pb, err = powerLayoutFramePlaybook(plan, raw)
+				} else {
+					pb, err = powerLayoutPlaybook(plan, raw)
+				}
 				if err != nil {
 					return err
 				}
@@ -166,11 +179,12 @@ with fresh geometry guards and post-apply pin/net verification.`,
 	c.Flags().StringVar(&from, "from", "", "measured components.list JSON with bbox, pins and pin nets")
 	c.Flags().StringVar(&out, "out", "", "write offline layout plan JSON (default stdout)")
 	c.Flags().StringVar(&playbookOut, "playbook", "", "also write a guarded ordered sch apply playbook")
+	c.Flags().BoolVar(&framesOnly, "frames-only", false, "with --playbook: verify the existing circuit and apply only frame/title data")
 	c.Flags().StringVar(&core, "core", "U1", "fixed AMS1117 designator")
 	c.Flags().StringVar(&inputCap, "input-cap", "C2", "input capacitor designator")
 	c.Flags().StringVar(&outputCaps, "output-caps", "C1,C3", "two output capacitor designators, nearest first")
 	c.Flags().StringVar(&doc, "doc", "", "document UUID (must match snapshot context when present)")
-	c.Flags().StringVar(&at, "at", "", "target core anchor x,y on the 5-unit grid; default measured anchor")
+	c.Flags().StringVar(&at, "at", "", "target core anchor x,y on the 5-unit grid; default module starts at the sheet's top-left (frames-only preserves placement)")
 	return c
 }
 
@@ -329,7 +343,7 @@ func planPowerLayout(raw []byte, o powerLayoutOptions) (*powerLayoutPlan, error)
 	if !(p3.X < core.BBox.MinX && p4.X > core.BBox.MaxX && p1.X == p2.X && p2.X == p3.X && p1.Y < p2.Y && p2.Y < p3.Y) {
 		return nil, fmt.Errorf("unsupported core pin orientation: calibrate VIN-left/VOUT4-right with GND below VOUT2/VIN before planning")
 	}
-	plan := &powerLayoutPlan{SchemaVersion: 1, DocumentID: doc, Placements: []powerLayoutPlacement{core}, ExpectedPinNets: map[string]string{}, Notes: []string{"Fixed AMS1117 topology; input and output shunt capacitors are vertical with pin1 up and pin2 down.", "Pin 2 duplicates VOUT electrically; its short left-facing local power symbol avoids routing around the core. Main VOUT pin 4 directly wires both output capacitors.", "Spacing reserves capacitor designator/value text and marker names using the shared text-width model plus the cluster gap. Rendered text/flag bboxes still require post-apply verification."}}
+	plan := &powerLayoutPlan{SchemaVersion: 1, DocumentID: doc, Placements: []powerLayoutPlacement{core}, ExpectedPinNets: map[string]string{}}
 	input, err := plVertical(parts[o.InputCap])
 	if err != nil {
 		return nil, err
@@ -382,8 +396,24 @@ func planPowerLayout(raw []byte, o powerLayoutOptions) (*powerLayoutPlan, error)
 			plan.ExpectedPinNets[c.Designator+"."+p.Number] = p.Net
 		}
 	}
+	frame, err := measureSchModuleFrame("POWER", "POWER / AMS1117-3.3", powerLayoutContentBounds(plan))
+	if err != nil {
+		return nil, err
+	}
+	plan.Frames = []schFrameSpec{frame}
+	if o.At == nil && !o.PreservePosition {
+		packed, err := planSchModuleRows(plan.Frames, *sheet, 20, 20)
+		if err != nil {
+			return nil, err
+		}
+		translatePowerLayout(plan, packed[0].DX, packed[0].DY)
+		plan.Frames[0] = packed[0].Frame
+	}
 	if err := validatePowerLayout(plan, *sheet); err != nil {
 		return nil, err
+	}
+	if !boxInside(plan.Frames[0].Rect, *sheet) {
+		return nil, fmt.Errorf("module frame/title outside sheet; revise the input layout (no automatic pagination)")
 	}
 	return plan, nil
 }

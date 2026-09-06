@@ -83,11 +83,12 @@ type playbookStep struct {
 }
 
 type playbook struct {
-	Version  int               `json:"version"`
-	Meta     playbookMeta      `json:"meta"`
-	Defaults stepPolicy        `json:"defaults"`
-	Vars     map[string]string `json:"vars,omitempty"`
-	Steps    []playbookStep    `json:"steps"`
+	RequireFullExecution bool              `json:"requireFullExecution,omitempty"`
+	Version              int               `json:"version"`
+	Meta                 playbookMeta      `json:"meta"`
+	Defaults             stepPolicy        `json:"defaults"`
+	Vars                 map[string]string `json:"vars,omitempty"`
+	Steps                []playbookStep    `json:"steps"`
 }
 
 // ── journal model ───────────────────────────────────────────────────────────
@@ -137,7 +138,7 @@ Precedence: CLI flag > playbook file > built-in default.`,
 			}
 
 			// Guarded graph plans cannot skip their baseline or replay into another page.
-			guarded := false
+			guarded := pb.RequireFullExecution
 			for _, step := range pb.Steps {
 				if step.ExpectedConnectivity != nil {
 					guarded = true
@@ -145,10 +146,10 @@ Precedence: CLI flag > playbook file > built-in default.`,
 			}
 			if guarded {
 				if resume || fromRef != "" || toRef != "" {
-					return fmt.Errorf("guarded connectivity plans require a fresh full execution; re-export and re-plan after failure")
+					return fmt.Errorf("guarded plans require a fresh full execution; re-export and re-plan after failure")
 				}
 				if (cfg.project != "" && cfg.project != pb.Meta.Project) || (doc != "" && doc != pb.Meta.Doc) {
-					return fmt.Errorf("cannot override connectivity plan target")
+					return fmt.Errorf("cannot override guarded plan target")
 				}
 				local := *cfg
 				local.doc = pb.Meta.Doc
@@ -298,6 +299,9 @@ func stepKind(s *playbookStep) string {
 
 func preflight(pb *playbook, vars map[string]string) []string {
 	var errs []string
+	if pb.RequireFullExecution && pb.Meta.Doc == "" {
+		errs = append(errs, "requireFullExecution requires meta.doc")
+	}
 	for _, s := range pb.Steps {
 		if s.ExpectedConnectivity != nil {
 			d := s.ExpectedConnectivity
@@ -929,10 +933,13 @@ func (r *applyRunner) execute() error {
 			}
 			fallthrough
 		default: // stop
-			fmt.Fprintf(r.stderr, "  journal: %s\n  修复后续跑: easyeda apply %s --resume\n",
-				r.journalPath, r.pbPath)
-			if !r.isReadOnly(s, catalog) {
-				fmt.Fprintf(r.stderr, "  ⚠ 变更类步骤失败/超时:变更可能已生效——先读回校验,再 --resume(必要时 --from 跳过本步)\n")
+			if r.pb.RequireFullExecution {
+				fmt.Fprintf(r.stderr, "  journal: %s\n  先回读实际状态,重新生成计划并完整执行 sch apply;此队列禁止 --resume/--from/--to 跳过校验。\n", r.journalPath)
+			} else {
+				fmt.Fprintf(r.stderr, "  journal: %s\n  修复后续跑: easyeda sch apply %s --resume\n", r.journalPath, r.pbPath)
+				if !r.isReadOnly(s, catalog) {
+					fmt.Fprintf(r.stderr, "  ⚠ 变更类步骤失败/超时:变更可能已生效——先读回校验,再决定恢复步骤\n")
+				}
 			}
 			return fmt.Errorf("playbook stopped at step %s (%d ok, %d skipped)", ref, okCount, skipCount)
 		}

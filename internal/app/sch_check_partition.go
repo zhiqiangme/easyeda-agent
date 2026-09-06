@@ -143,5 +143,8 @@ func schPartitionPageEvidence(cfg *appConfig, window string, texts []zoneMoveTex
 	if f, _ := recordedZoneFrames(st, docUUID); f != nil {
 		ev.RecordedRects, ev.RecordedLabels = len(f.Rects), len(f.Texts)
 	}
+	moduleFrames := recordedModuleFrameCount(st, docUUID)
+	ev.RecordedRects += moduleFrames
+	ev.RecordedLabels += moduleFrames
 	return ev
 }

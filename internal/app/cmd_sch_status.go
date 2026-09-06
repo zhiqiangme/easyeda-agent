@@ -339,6 +339,7 @@ func collectSchPageFacts(cfg *appConfig, window, docUUID, name string, st *pcbSt
 		if fr := st.SchZoneFrameIdsByPage[docUUID]; fr != nil {
 			f.Frames = len(fr.Rects)
 		}
+		f.Frames += recordedModuleFrameCount(st, docUUID)
 	}
 	// includeWires 让导线跟几何**同一次调用、同一次页校验**回来。
 	//

@@ -232,8 +232,11 @@ type State struct {
 	// SchZoneFrameIdsByPage keys every zone-draw mode by documentUuid so redraw /
 	// clear on one schematic page never wipes another page's annotations.
 	SchZoneFrameIdsByPage map[string]*SchZoneFrames `json:"schZoneFrameIdsByPage,omitempty"`
-	History               []Event                   `json:"history,omitempty"`
-	UpdatedAt             string                    `json:"updatedAt"`
+	// SchModuleFramesByPage owns only data-driven sch frame primitives. It is
+	// separate from legacy zone-draw ownership so neither tool deletes the other.
+	SchModuleFramesByPage map[string]map[string]*SchModuleFrame `json:"schModuleFramesByPage,omitempty"`
+	History               []Event                               `json:"history,omitempty"`
+	UpdatedAt             string                                `json:"updatedAt"`
 
 	// bound is the LIVE project uuid this in-memory state was bound to (see
 	// Bind). Not persisted: it is a fact about this process's window, not about
@@ -374,7 +377,7 @@ func (s *State) SetGroupsForPage(documentUUID string, groups []*Group) {
 		}
 		// The owner stamp outlives an empty group table only if some OTHER table
 		// still keys this page — otherwise it is orphan bookkeeping.
-		if len(s.SchZonesByPage[documentUUID]) == 0 && s.SchZoneFrameIdsByPage[documentUUID] == nil {
+		if len(s.SchZonesByPage[documentUUID]) == 0 && s.SchZoneFrameIdsByPage[documentUUID] == nil && len(s.SchModuleFramesByPage[documentUUID]) == 0 {
 			s.forgetPage(documentUUID)
 		}
 	} else {
@@ -396,6 +399,42 @@ type SchZoneFrames struct {
 	Rects        []string `json:"rects,omitempty"`
 	Texts        []string `json:"texts,omitempty"`
 	At           string   `json:"at,omitempty"`
+}
+
+// SchModuleFrame is the durable receipt for one declarative module frame.
+// Pending + the pre-write inventory makes an interrupted create recoverable
+// without blindly resending a write whose response may have been lost.
+type SchModuleFrame struct {
+	RectangleID      string   `json:"rectangleId,omitempty"`
+	TextID           string   `json:"textId,omitempty"`
+	PlanHash         string   `json:"planHash"`
+	Pending          bool     `json:"pending,omitempty"`
+	BeforeRectangles []string `json:"beforeRectangles,omitempty"`
+	BeforeTexts      []string `json:"beforeTexts,omitempty"`
+}
+
+func (s *State) SetSchModuleFrame(documentUUID, frameID string, frame *SchModuleFrame) {
+	if s.SchModuleFramesByPage == nil {
+		s.SchModuleFramesByPage = map[string]map[string]*SchModuleFrame{}
+	}
+	if s.SchModuleFramesByPage[documentUUID] == nil {
+		s.SchModuleFramesByPage[documentUUID] = map[string]*SchModuleFrame{}
+	}
+	s.SchModuleFramesByPage[documentUUID][frameID] = frame
+	s.stampPage(documentUUID)
+}
+
+func (s *State) SchModuleFrameCount(documentUUID string) int {
+	if s == nil {
+		return 0
+	}
+	n := 0
+	for _, f := range s.SchModuleFramesByPage[documentUUID] {
+		if f != nil && !f.Pending && f.RectangleID != "" && f.TextID != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // ZoneClaim is one functional zone's part claim (issue #126): the S0 spec's

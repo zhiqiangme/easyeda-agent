@@ -1923,6 +1923,7 @@ the selection). Without --ids it exports the whole active page.`,
 	sch.AddCommand(newSchExtractLayoutCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchZonesCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchZoneDrawCmd(cfg, &window, stdout, stderr))
+	sch.AddCommand(newSchFrameCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchZonePlanCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchZoneArrangeCmd(cfg, &window, stdout, stderr))
 	// 持久化编组(用户点名;#173 的 sch 侧):平台无编组 API(真机探测坐实),
