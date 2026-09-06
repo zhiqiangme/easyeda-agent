@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -115,5 +116,132 @@ func TestPlanPairRoute(t *testing.T) {
 	res2 := planPairRoute(comps, pair, map[string]bool{"USB_DP": true}, opt)
 	if res2.Status != "already-routed" {
 		t.Errorf("expected already-routed, got %+v", res2)
+	}
+}
+
+// ── T-11: copper-layer counting on a 2-layer board ──────────────────────────
+
+// layer 组一条 pcb.layers.list 里的 layer 项。
+func layer(id int, name, typ string, status int) map[string]any {
+	return map[string]any{"id": float64(id), "name": name, "type": typ, "layerStatus": float64(status)}
+}
+
+// twoLayerBoard 复刻实测(EasyEDA Pro 3.2.135)2 层板的 pcb.layers.list 形状:
+// 真正的两层铜是 type=TOP / BOTTOM(layerStatus=1),而 Inner1..Inner32 全部存在、
+// 全部 type=SIGNAL 且 layerStatus=0(EPCB_LayerStatus.NOT_USED,未启用)。
+func twoLayerBoard() []any {
+	out := []any{
+		layer(1, "Top Layer", "TOP", 1),
+		layer(2, "Bottom Layer", "BOTTOM", 1),
+		layer(3, "Top Silkscreen Layer", "TOP_SILK", 1),
+		layer(4, "Bottom Silkscreen Layer", "BOT_SILK", 1),
+		layer(12, "Multi-Layer", "MULTI", 1),
+	}
+	for i := 1; i <= 32; i++ {
+		out = append(out, layer(14+i, fmt.Sprintf("Inner%d", i), "SIGNAL", 0))
+	}
+	return out
+}
+
+func TestCopperLayerCountFromResult(t *testing.T) {
+	fourLayer := append([]any{}, twoLayerBoard()...)
+	for i, li := range fourLayer {
+		m := li.(map[string]any)
+		if m["name"] == "Inner1" || m["name"] == "Inner2" {
+			m["layerStatus"] = float64(1)
+			fourLayer[i] = m
+		}
+	}
+
+	cases := []struct {
+		name    string
+		result  map[string]any
+		want    int
+		wantOK  bool
+		wantSrc string
+	}{{
+		name:    "platform copperLayerCount wins",
+		result:  map[string]any{"copperLayerCount": float64(2), "layers": twoLayerBoard()},
+		want:    2,
+		wantOK:  true,
+		wantSrc: "pcb.layers.list.copperLayerCount",
+	}, {
+		// T-11 的回归:没有平台字段时,32 个未启用的 Inner 层不得被算成铜层。
+		name:    "2-layer board with 32 disabled inner layers counts 2",
+		result:  map[string]any{"layers": twoLayerBoard()},
+		want:    2,
+		wantOK:  true,
+		wantSrc: "pcb.layers.list.layers[] (enabled copper)",
+	}, {
+		name:    "4-layer board counts the two ENABLED inner layers",
+		result:  map[string]any{"layers": fourLayer},
+		want:    4,
+		wantOK:  true,
+		wantSrc: "pcb.layers.list.layers[] (enabled copper)",
+	}, {
+		name: "an enabled PLANE inner layer counts as copper",
+		result: map[string]any{"layers": []any{
+			layer(1, "Top Layer", "TOP", 1),
+			layer(2, "Bottom Layer", "BOTTOM", 1),
+			layer(15, "Inner1", "PLANE", 1),
+			layer(16, "Inner2", "SIGNAL", 2), // HIDDEN is USED, just not shown
+			layer(17, "Inner3", "SIGNAL", 0),
+		}},
+		want:    4,
+		wantOK:  true,
+		wantSrc: "pcb.layers.list.layers[] (enabled copper)",
+	}, {
+		name:   "a bogus platform count below 2 falls through to layers[]",
+		result: map[string]any{"copperLayerCount": float64(0), "layers": twoLayerBoard()},
+		want:   2,
+		wantOK: true,
+	}, {
+		name:   "nothing readable is reported as no evidence, not as 32",
+		result: map[string]any{},
+		want:   0,
+		wantOK: false,
+	}, {
+		name:   "only non-copper layers is no evidence",
+		result: map[string]any{"layers": []any{layer(3, "Top Silkscreen Layer", "TOP_SILK", 1)}},
+		want:   0,
+		wantOK: false,
+	}, {
+		// layerStatus 缺失时按「启用」算 —— 只有明确的 0 才排除。
+		name: "a layer without layerStatus counts as enabled",
+		result: map[string]any{"layers": []any{
+			map[string]any{"id": float64(1), "name": "Top Layer", "type": "TOP"},
+			map[string]any{"id": float64(2), "name": "Bottom Layer", "type": "BOTTOM"},
+		}},
+		want:   2,
+		wantOK: true,
+	}}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, src, ok := copperLayerCountFromResult(tc.result)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (got %d from %q)", ok, tc.wantOK, got, src)
+			}
+			if got != tc.want {
+				t.Errorf("count = %d, want %d (source %q)", got, tc.want, src)
+			}
+			if tc.wantSrc != "" && src != tc.wantSrc {
+				t.Errorf("source = %q, want %q", src, tc.wantSrc)
+			}
+		})
+	}
+}
+
+// TestCopperLayerCountNeverMistakesTwoForFour 是 T-11 的门:2 层板绝不能落进
+// route-critical 的 power-planes 分支(该分支会 pcb.stackup.set{count:4} 改板)。
+func TestCopperLayerCountNeverMistakesTwoForFour(t *testing.T) {
+	for _, res := range []map[string]any{
+		{"copperLayerCount": float64(2), "layers": twoLayerBoard()},
+		{"layers": twoLayerBoard()},
+	} {
+		n, src, ok := copperLayerCountFromResult(res)
+		if !ok || n >= 4 {
+			t.Fatalf("2-layer board resolved to %d layers (ok=%v, source=%q) — power-planes would re-stack it", n, ok, src)
+		}
 	}
 }

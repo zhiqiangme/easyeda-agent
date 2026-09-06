@@ -30,11 +30,13 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
 )
 
 // ── diff-pair identification ────────────────────────────────────────────────
@@ -295,7 +297,9 @@ func splitCSVList(items []string) []string {
 func newPcbRouteCriticalCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var (
 		skipPower, skipDiff, noLock, dryRun bool
+		allowStackupChange                  bool
 		forceReason, forceUnsafeReason      string
+		specPath                            string
 	)
 	c := &cobra.Command{
 		Use:   "route-critical",
@@ -322,6 +326,22 @@ and identifies without mutating.`,
   easyeda pcb route-critical --project ceshi --skip-power   # pairs only`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// S0 spec 的 stackup.layers(若有)是本次运行的层数**权威**。先读,
+			// 读不动就早死,别等到板子已经被前面的步骤写过。
+			declared := 0
+			if specPath != "" {
+				raw, rerr := os.ReadFile(specPath)
+				if rerr != nil {
+					return fmt.Errorf("read spec: %w", rerr)
+				}
+				s0, perr := spec.Parse(raw)
+				if perr != nil {
+					return perr
+				}
+				if s0.Stackup != nil {
+					declared = s0.Stackup.Layers
+				}
+			}
 			// ADR-0004 Decision 4: dry-run 必须纯计算 —— 机械保证,Mutates 派发直接被拒。
 			if dryRun {
 				defer setDispatchDryRun(true)()
@@ -340,14 +360,30 @@ and identifies without mutating.`,
 			if skipPower {
 				out["power"] = "skipped (--skip-power)"
 			} else {
-				copper := copperLayerCount(cfg, *window, stderr)
+				copper, copperSrc := copperLayerCount(cfg, *window, stderr)
+				out["copperLayerCount"] = copper
+				out["copperLayerCountSource"] = copperSrc
+				// spec 说了算:S0 的 stackup.layers 是**人写下的意图**,活板与它不
+				// 一致时 route-critical 不改板 —— 它是布线命令,不是叠层命令(T-11)。
+				if declared > 0 {
+					out["copperLayerCountDeclared"] = declared
+					if declared != copper {
+						return fmt.Errorf(
+							"stackup conflict: spec declares %d copper layer(s) but the board reads %d (%s).\n"+
+								"route-critical routes, it does not re-stack a board. Fix one of the two first:\n"+
+								"  board  → easyeda pcb stackup set --layers %d   (changes the PCB!)\n"+
+								"  spec   → set stackup.layers to %d in %s",
+							declared, copper, copperSrc, declared, copper, specPath)
+					}
+					copperSrc = "spec (confirmed against " + copperSrc + ")"
+				}
 				if copper >= 4 {
-					out["power"] = "power-planes (4-layer)"
-					if err := runPowerPlanes(cfg, *window, 15, 16, true, dryRun, stderr, stderr); err != nil {
+					out["power"] = fmt.Sprintf("power-planes (%d-layer, from %s)", copper, copperSrc)
+					if err := runPowerPlanes(cfg, *window, 15, 16, true, dryRun, allowStackupChange, stderr, stderr); err != nil {
 						return fmt.Errorf("power step (power-planes): %w", err)
 					}
 				} else {
-					out["power"] = "power-pour (2-layer)"
+					out["power"] = fmt.Sprintf("power-pour (%d-layer, from %s)", copper, copperSrc)
 					if err := runPowerPour(cfg, *window, "both", "pour", railMargin, 0, true, true, dryRun, stderr, stderr); err != nil {
 						return fmt.Errorf("power step (power-pour): %w", err)
 					}
@@ -500,6 +536,11 @@ and identifies without mutating.`,
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "plan + identify without mutating")
 	c.Flags().StringVar(&forceReason, "force", "", "bypass SOFT gate gaps only (audited, per-run) — same tiering as route-short (#132)")
 	c.Flags().StringVar(&forceUnsafeReason, "force-unsafe", "", "bypass EVERYTHING incl. an unconfirmed skeleton (audited, per-run)")
+	c.Flags().StringVar(&specPath, "spec", "", "S0 spec JSON — its stackup.layers is AUTHORITATIVE: when the live board\n"+
+		"disagrees the command refuses instead of re-stacking the board")
+	c.Flags().BoolVar(&allowStackupChange, "allow-stackup-change", false,
+		"permit the power step to CHANGE the board's copper layer count (pcb stackup set).\n"+
+			"Off by default: route-critical routes, it does not re-stack a board (T-11)")
 	return c
 }
 
@@ -517,15 +558,62 @@ func dedupeStrings(in []string) []string {
 	return out
 }
 
-// copperLayerCount counts copper layers from pcb.layers.list (SIGNAL/PLANE
-// types on copper layer ids); falls back to 2 when unreadable.
+// copperLayerTypes 是 pcb.layers.list 里算「铜层」的 type 值。
+//
+// 实测(EasyEDA Pro 3.2.135,2 层板)的 type 取值与 @jlceda/pro-api-types 的
+// EPCB_LayerType 枚举**不一致**:外层不叫 SIGNAL 而是 TOP / BOTTOM,只有内层
+// Inner1..Inner32 才叫 SIGNAL(内电层是 PLANE)。四个值都收下,才既算得到外层、
+// 又不漏掉内层。
+var copperLayerTypes = map[string]bool{"TOP": true, "BOTTOM": true, "SIGNAL": true, "PLANE": true}
+
+// copperLayerCountFromResult 从一份 pcb.layers.list 的 result 里读出**已启用**的
+// 铜层数,并说明这个数字的出处。ok=false 表示这份 result 里没有可信证据。
+//
+// 优先用平台自己的 copperLayerCount 字段(连接器直接转发
+// eda.pcb_Layer.getTheNumberOfCopperLayers()),它就是叠层对话框里的那个数。
+// 读不到时才退回数 layers[]:只数 copperLayerTypes 里的 type,且 layerStatus 必须
+// 不是 0(EPCB_LayerStatus.NOT_USED,即「不使用」)。
+//
+// 这个 layerStatus 过滤是 T-11 的根。实测 2 层板的 pcb.layers.list 回 260 条 layer,
+// 其中 Inner1..Inner32 全是 type=SIGNAL、layerStatus=0(未启用),而真正的两层铜是
+// type=TOP / BOTTOM。老实现只数 SIGNAL|PLANE 又不看 layerStatus,于是**任何**板子
+// 都数出 32 —— 一块 2 层板被判成 >=4 层,走进 power-planes,而 power-planes 头一件
+// 事就是 pcb.stackup.set{count:4},把一块已下单的 2 层板改成了 4 层。
+func copperLayerCountFromResult(result map[string]any) (int, string, bool) {
+	if v, ok := asFloatOK(result["copperLayerCount"]); ok && v >= 2 {
+		return int(v), "pcb.layers.list.copperLayerCount", true
+	}
+	raw, _ := result["layers"].([]any)
+	n := 0
+	for _, ri := range raw {
+		m, ok := ri.(map[string]any)
+		if !ok {
+			continue
+		}
+		if !copperLayerTypes[strings.ToUpper(asString(m["type"]))] {
+			continue
+		}
+		// 缺 layerStatus 时按「启用」算 —— 只有明确的 NOT_USED(0) 才排除。
+		if st, ok := asFloatOK(m["layerStatus"]); ok && st == 0 {
+			continue
+		}
+		n++
+	}
+	if n < 2 {
+		return 0, "", false
+	}
+	return n, "pcb.layers.list.layers[] (enabled copper)", true
+}
+
+// copperLayerCount 读活板的已启用铜层数,返回层数与它的出处(出处进回执,让
+// 「为什么走了这条电源分支」事后可复查);读不到时按 2 层降级。
 //
 // 这个「读不到就当 2 层」的兜底在 STALE_READ 门下变得危险:板子若在本命令开跑前
 // 就脏(上一条命令写完没 reload),这一读会被门拒掉,于是一块 4 层板被静默当成 2
 // 层 —— 走的是 power-pour 而不是 power-planes,两条电源轨挤同一层,正是内电层要
 // 解决的那个冲突。**这一读按设计不放行**(它是命令入口的规划读,不是写后回读),
 // 所以唯一负责任的做法是把兜底说出来,别让分档决策静默走偏。
-func copperLayerCount(cfg *appConfig, window string, stderr io.Writer) int {
+func copperLayerCount(cfg *appConfig, window string, stderr io.Writer) (int, string) {
 	res, err := requestAction(cfg, "pcb.layers.list", window, nil)
 	if err != nil {
 		if isStaleRead(err) {
@@ -534,22 +622,22 @@ func copperLayerCount(cfg *appConfig, window string, stderr io.Writer) int {
 		} else {
 			fmt.Fprintf(stderr, "⚠ route-critical: 读不到叠层(%v)—— 按 2 层降级(将走 power-pour 而不是 power-planes)\n", err)
 		}
-		return 2
+		return 2, "unreadable — fell back to 2"
 	}
-	raw, _ := res.Result["layers"].([]any)
-	n := 0
-	for _, ri := range raw {
-		m, ok := ri.(map[string]any)
-		if !ok {
-			continue
-		}
-		t := strings.ToUpper(asString(m["type"]))
-		if t == "SIGNAL" || t == "PLANE" {
-			n++
-		}
+	n, src, ok := copperLayerCountFromResult(res.Result)
+	if !ok {
+		fmt.Fprintln(stderr, "⚠ route-critical: pcb.layers.list 里没有可信的铜层证据 —— 按 2 层降级(将走 power-pour)")
+		return 2, "no copper evidence — fell back to 2"
 	}
-	if n < 2 {
-		return 2
+	return n, src
+}
+
+// currentCopperLayerCount 是 copperLayerCount 的静默版:同一份证据、同一套判据,
+// 但不写 stderr —— 给「决定要不要改板」这种非入口读用(pcb_powerplanes.go)。
+func currentCopperLayerCount(cfg *appConfig, window string) (int, string, bool) {
+	res, err := requestAction(cfg, "pcb.layers.list", window, nil)
+	if err != nil {
+		return 0, "", false
 	}
-	return n
+	return copperLayerCountFromResult(res.Result)
 }

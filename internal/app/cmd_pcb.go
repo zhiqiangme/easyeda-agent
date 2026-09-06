@@ -3414,7 +3414,7 @@ current stackup with 'pcb layers' (copperLayerCount + each layer's type).`,
 	// ceshi: DRC No-Connection → 0. Core in pcb_powerplanes.go.
 	{
 		var gndLayer, powerLayer int
-		var dryRun, gndPlane bool
+		var dryRun, gndPlane, allowStackupChange bool
 		c := &cobra.Command{
 			Use:   "power-planes",
 			Short: "4-layer power distribution: GND 内电层 + power inner plane + via-stitch (fixes 2-layer pour conflict)",
@@ -3444,13 +3444,17 @@ Validated on ceshi: DRC 31 → 0, No-Connection → 0. Run AFTER auto-place + ou
   easyeda pcb power-planes --gnd-plane=false   # keep GND as a signal-layer pour
   easyeda pcb power-planes --dry-run`,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return runPowerPlanes(cfg, window, gndLayer, powerLayer, gndPlane, dryRun, stdout, stderr)
+				return runPowerPlanes(cfg, window, gndLayer, powerLayer, gndPlane, dryRun, allowStackupChange, stdout, stderr)
 			},
 		}
 		c.Flags().IntVar(&gndLayer, "gnd-layer", 15, "inner layer id for the GND plane (15=Inner1)")
 		c.Flags().IntVar(&powerLayer, "power-layer", 16, "inner layer id for the power plane (16=Inner2)")
 		c.Flags().BoolVar(&gndPlane, "gnd-plane", true, "flip the GND inner layer to 内电层/PLANE after pouring (customer-stackup correct)")
 		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the plan (nets→layers, pad counts) without mutating")
+		c.Flags().BoolVar(&allowStackupChange, "allow-stackup-change", false,
+			"permit step 1 to CHANGE the board's copper layer count (pcb stackup set --layers 4). "+
+				"Off by default: a board with <4 copper layers is REFUSED, not silently re-stacked "+
+				"(T-11). On a 2-layer board use `pcb power-pour` instead")
 		pcb.AddCommand(c)
 	}
 

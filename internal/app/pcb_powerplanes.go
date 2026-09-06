@@ -34,7 +34,11 @@ type ppNet struct {
 // inner-layer ids (15=Inner1, 16=Inner2 on a 4-layer board). gndAsPlane flips the GND
 // inner layer to 内电层/PLANE after pouring (the verified pour-while-SIGNAL → flip →
 // rebuild recipe; DRC stays clean — see the pcb-inner-plane-fill memory).
-func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gndAsPlane, dryRun bool, stdout, stderr io.Writer) error {
+//
+// allowStackupChange gates step 3: without it a board with fewer than 4 copper
+// layers is REFUSED rather than re-stacked (T-11). A board that already has 4+
+// copper layers never triggers the gate, since nothing needs changing.
+func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gndAsPlane, dryRun, allowStackupChange bool, stdout, stderr io.Writer) error {
 	// ADR-0004 Decision 4: dry-run 必须纯计算 —— 机械保证,Mutates 派发直接被拒。
 	if dryRun {
 		defer setDispatchDryRun(true)()
@@ -116,8 +120,26 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 		return enc.Encode(map[string]any{"dryRun": true, "plan": plan, "routeAsTracks": routeAsTracks, "warnings": warnings, "pourRect": rect, "gndAsPlane": gndAsPlane, "gndLayer": gndLayer})
 	}
 
-	// 3. Ensure ≥4 copper layers.
-	if _, err := requestAction(cfg, "pcb.stackup.set", window, map[string]any{"count": 4}); err != nil {
+	// 3. Ensure >=4 copper layers — but NEVER silently. Re-stacking a board is
+	//    irreversible in fab terms (a 2-layer board that is already ordered comes
+	//    back as a different part), so a board that is not already 4+ layers is
+	//    only upgraded when the caller said so out loud (T-11: route-critical
+	//    mis-counted a 2-layer board as 4 and this line quietly re-stacked it).
+	if live, _, ok := currentCopperLayerCount(cfg, window); ok && live >= 4 {
+		// Already deep enough — nothing to set, so nothing to guard.
+	} else if !allowStackupChange {
+		have := "unknown"
+		if ok {
+			have = fmt.Sprintf("%d", live)
+		}
+		return fmt.Errorf(
+			"power-planes needs >=4 copper layers but the board has %s — refusing to re-stack it.\n"+
+				"Inner planes only make sense on a 4+ layer board; on a 2-layer board use `pcb power-pour` instead.\n"+
+				"If you really do want this board re-stacked to 4 layers, say so explicitly:\n"+
+				"  easyeda pcb power-planes --allow-stackup-change\n"+
+				"  easyeda pcb stackup set --layers 4        # or do it as its own deliberate step",
+			have)
+	} else if _, err := requestAction(cfg, "pcb.stackup.set", window, map[string]any{"count": 4}); err != nil {
 		return fmt.Errorf("set 4 copper layers: %w", err)
 	}
 
