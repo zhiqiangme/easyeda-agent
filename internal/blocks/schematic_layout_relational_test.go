@@ -208,10 +208,10 @@ func TestRelationalLayout_EmptyTemplateIsAnError(t *testing.T) {
 	}
 }
 
-// AMS1117 is a regression corpus entry for the data-driven power layout.  Keep
-// both VOUT pads represented by separate attach targets so the solver can place
-// the bulk and high-frequency capacitors from measured pin geometry instead of
-// guessing a single output coordinate.
+// The two output capacitors share the right-side visual rail. Attach is a
+// geometry reference; physical VOUT pins 2/4 remain in the electrical fanout.
+// Measured XY, rotation and route invariants are exercised in app's planner
+// tests rather than inferred from these declarative template assertions.
 func TestPowerLayoutTrainingCorpus_AMS1117(t *testing.T) {
 	blk, ok, err := Get("block.ams1117_ldo_3v3")
 	if err != nil || !ok {
@@ -221,14 +221,13 @@ func TestPowerLayoutTrainingCorpus_AMS1117(t *testing.T) {
 	if err != nil || layout == nil {
 		t.Fatalf("read AMS1117 schematic layout: %v", err)
 	}
-	if layout.Attach["C_OUT"] != "U.4" || layout.Attach["C_BYP"] != "U.2" {
-		t.Fatalf("VOUT fanout training targets lost: %+v", layout.Attach)
+	if layout.Attach["C_OUT"] != "U.4" || layout.Attach["C_BYP"] != "U.4" {
+		t.Fatalf("output capacitors must share the right-side rail: %+v", layout.Attach)
 	}
-	if layout.Orient["C_IN"] != "horizontal" || layout.Orient["C_OUT"] != "horizontal" || layout.Orient["C_BYP"] != "horizontal" {
+	if layout.Orient["C_IN"] != "vertical" || layout.Orient["C_OUT"] != "vertical" || layout.Orient["C_BYP"] != "vertical" {
 		t.Fatalf("power capacitor orientation intent lost: %+v", layout.Orient)
 	}
 	var issues []string
-	_ = layout // validateSchematicLayout reads the block's embedded layout
 	validateSchematicLayout(blk, func(field, msg string) { issues = append(issues, field+": "+msg) })
 	if len(issues) != 0 {
 		t.Fatalf("AMS1117 training fixture should validate: %v", issues)
