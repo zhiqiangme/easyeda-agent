@@ -98,6 +98,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	sch.AddCommand(newSchConnectivityDiffCmd(stdout))
 	sch.AddCommand(newSchPlanCmd(stdout))
 	sch.AddCommand(newSchMaterializeCmd(stdout, stderr))
+	sch.AddCommand(newSchComposeCmd(stdout, stderr))
 	// `sch apply` is the schematic-domain entry point for the shared, ordered
 	// playbook executor. The executor itself remains shared so queue semantics
 	// and WebSocket response handling stay identical across domains.
@@ -344,7 +345,7 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 	// ── clear ──────────────────────────────────────────────────────────────
 	// schematic.page.clear
 	{
-		var noPreserveSheet, dryRun bool
+		var noPreserveSheet, dryRun, expectEmpty bool
 		c := &cobra.Command{
 			Use:   "clear",
 			Short: "Clear the active schematic page (delete all page primitives: components, flags, wires, buses, graphics)",
@@ -363,10 +364,14 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 						docUUID, project = d, pr
 					}
 				}
-				if err := dispatch(cfg, "schematic.page.clear", window, map[string]any{
+				res, err := dispatchCapture(cfg, "schematic.page.clear", window, map[string]any{
 					"preserveSheet": !noPreserveSheet,
 					"dryRun":        dryRun,
-				}, stdout, stderr); err != nil {
+				}, stdout)
+				if err != nil {
+					return err
+				}
+				if err = verifySchClearResult(res.Result, !dryRun || expectEmpty); err != nil {
 					return err
 				}
 				if !dryRun && docUUID != "" {
@@ -376,6 +381,7 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 			},
 		}
 		c.Flags().BoolVar(&dryRun, "dry-run", false, "report counts without deleting anything")
+		c.Flags().BoolVar(&expectEmpty, "expect-empty", false, "fail if any non-preserved primitive remains (also usable with --dry-run)")
 		c.Flags().BoolVar(&noPreserveSheet, "no-preserve-sheet", false, "also delete the sheet/title block (图框); by default it is kept")
 		sch.AddCommand(c)
 	}
@@ -438,7 +444,7 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 	// ── list ─────────────────────────────────────────────────────────────
 	// schematic.components.list
 	{
-		var allPages, includeBBox, includePins, stay bool
+		var allPages, includeBBox, includePins, includeWires, includeDeviceIdentity, stay bool
 		var page string
 		c := &cobra.Command{
 			Use:   "list",
@@ -446,17 +452,13 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 			Args:  cobra.NoArgs,
 			Long: `List components on the active (or all) schematic page(s).
 
-Each component carries a structured ` + "`device`" + ` field
-{libraryUuid, uuid, name} — the device-library identity of the placed part
-(the same identity the rebind path resolves via ` + "`lib_Device.search`" + `). This is
-distinct from the ` + "`component`/`symbol`/`footprint`/`uniqueId`" + ` fields, which are
-placed-INSTANCE sub-primitive ids and cannot be replayed into ` + "`sch place`" + `.
-
-Use ` + "`device.uuid`" + ` to lock onto the exact symbol variant of a golden design
-instead of re-searching by LCSC C-number (which may hit a different pin-numbering
-variant). NOTE: imported devices (Altium/KiCad → EasyEDA) often report an EMPTY
-` + "`device.libraryUuid`" + `; when empty, resolve it via ` + "`lib search`" + ` / ` + "`lib by-lcsc`" + `
-before feeding it back into ` + "`sch place --uuid`" + `.`,
+Each component carries a structured device field {libraryUuid, uuid, name}.
+Use --include-device-identity for replay or composition baselines: raw device.uuid
+may be a 16-character placed-symbol id. Hydration resolves it to a 32-character
+device-library uuid and reports deviceIdentityError if exact identity is unknown.
+The component/symbol/footprint/uniqueId fields are instance identifiers and must
+not be replayed as a device-library uuid. Missing identity is unavailable evidence,
+not permission to substitute a similar symbol.`,
 			Example: `  easyeda sch list
   easyeda sch list --all-pages
   easyeda sch list --include-bbox
@@ -479,11 +481,18 @@ before feeding it back into ` + "`sch place --uuid`" + `.`,
 				if allPages {
 					payload["allPages"] = true
 				}
+				if includeWires {
+					payload["includeWires"] = true
+					payload["includeConnectivitySummary"] = true
+				}
 				if includeBBox {
 					payload["includeBBox"] = true
 				}
 				if includePins {
 					payload["includePins"] = true
+				}
+				if includeDeviceIdentity {
+					payload["includeDeviceIdentity"] = true
 				}
 				if len(payload) == 0 {
 					return dispatch(cfg, "schematic.components.list", window, nil, stdout, stderr)
@@ -494,6 +503,8 @@ before feeding it back into ` + "`sch place --uuid`" + `.`,
 		c.Flags().BoolVar(&allPages, "all-pages", false, "list components across all schematic pages (WARNING: non-active pages return shallow data — pins/bbox may be empty; use `doc switch` to that page for accurate data)")
 		c.Flags().StringVar(&page, "page", "", "switch to this page (name|uuid), wait for it to settle, then list — makes the page an explicit parameter instead of relying on the active tab (issue #67)")
 		c.Flags().BoolVar(&stay, "stay", false, "with --page, stay on the target page after listing instead of switching back")
+		c.Flags().BoolVar(&includeWires, "include-wires", false, "include existing wire segment geometry for composition comparison")
+		c.Flags().BoolVar(&includeDeviceIdentity, "include-device-identity", false, "resolve exact 32-character device-library identity for replay and composition guards")
 		c.Flags().BoolVar(&includeBBox, "include-bbox", false, "attach each component's rendered extent {minX,minY,maxX,maxY}")
 		c.Flags().BoolVar(&includePins, "include-pins", false, "attach each pin's {pinName,pinNumber,x,y,noConnected,net} — the data plane for routing/connectivity checks (net is the pin's current authoritative net, null when the netlist is unavailable; output grows, esp. with --all-pages)")
 		sch.AddCommand(c)

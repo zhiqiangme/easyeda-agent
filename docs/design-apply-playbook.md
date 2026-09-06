@@ -1,209 +1,146 @@
-# 设计:`easyeda sch apply` — 原理图声明式变更回放
+# SCH Apply 队列与状态守卫
 
-> **动机**(esp32MiniRequire 探针轮次 #1 实证):完整画一块板,agent 写了 10 个一次性
-> bash 脚本,内容全是同构胶水——循环调 `easyeda` 子命令、记日志、防超时、断点续跑。
-> 这层编排该内置:**一份 JSON 步骤文件 + `easyeda apply` 按步执行**,用户/agent 不再写
-> 任何 shell/python 组合脚本;同一份文件即是「复现脚本 + 回归用例 + 教学示例」。
+`easyeda sch apply` 顺序执行版本化 JSON 队列，等待每步 WebSocket 响应，捕获结果并记录
+journal。布局计算和差异判断在生成侧完成；Apply 负责执行和回读验证，不提供事务回滚。
+Lib 组合入口见 [单页组合](schematic-page-composition.md)。
 
-## 命令接口
+## 命令与执行范围
 
 ```bash
-easyeda sch apply steps.json                    # 顺序执行原理图队列,失败即停
-easyeda sch apply steps.json --dry-run          # 只校验格式/变量/动作名,打印计划
-easyeda sch apply steps.json --resume           # 按 journal 跳过已完成步骤,断点续跑
-easyeda sch apply steps.json --from 12 --to 30  # 区间执行(调试单段)
-easyeda sch apply steps.json --yes              # 放行确认门控步骤
-easyeda audit export --playbook > replay.json   # ★ 从真实会话的审计日志生成 playbook
+easyeda sch apply steps.json --dry-run  # 本地预检并打印步骤，不写 EDA
+easyeda sch apply steps.json --yes      # 执行已授权的完整队列
+
+# 仅适用于未启用完整执行守卫的普通队列
+easyeda sch apply steps.json --resume
+easyeda sch apply steps.json --from 12 --to 30
 ```
 
-## 文件格式(v1,定稿)
+`sch plan`、`sch compose` 等生成的受保护队列必须完整执行：
+`requireFullExecution:true` 或包含 `expectedConnectivity` 时，禁止 `--resume`、
+`--from/--to` 和更换目标工程/页面。失败后读取真实状态并重新生成完整队列，不能跳过前置检查。
+复用已正确放好但未接线的器件也是重新规划，不是断点续跑。
 
-### 顶层结构
+普通队列的 `--project`、`--window`、`--doc` 可覆盖 `meta`，`--var K=V` 可重复设置变量。
+步骤内执行策略优先于 `defaults`；不要通过目标覆盖或手改守卫将旧快照应用到其他页面。
 
-```jsonc
-{
-  "version": 1,                       // 必填,格式版本
-  "meta": {
-    "name": "esp32-mini-pcb",         // 必填,journal/报告里的标识
-    "description": "P0-P10 全流程",    // 可选
-    "project": "ceshi",               // 目标工程(名字或 uuid)——可被 CLI --project 复写
-    "window": "",                     // 可选,窗口 id(细控)——可被 --window 复写
-    "doc": "PCB1"                     // 可选,开跑前先 doc open/switch 到此文档
-  },
-  "defaults": {                       // 可选,所有步骤的默认执行策略
-    "timeoutSec": 20, "retry": 0, "continueOnError": false
-  },
-  "vars": { "LIB": "0819f05c…" },     // 变量表——可被 CLI --var K=V 复写/新增
-  "steps": [ /* 见下 */ ]
-}
-```
-
-### 复写优先级(用户显式要求,定稿)
-
-**CLI flag > playbook 文件 > 内置默认**,逐项:
-
-| 项 | 文件里 | CLI 复写 | 说明 |
-|---|---|---|---|
-| 目标工程 | `meta.project` | `--project` | 同一份 playbook 可打到不同工程(复现/回归的关键) |
-| 窗口 | `meta.window` | `--window` | 细控场景 |
-| 变量 | `vars.*` | `--var K=V`(可重复) | **参数化 playbook**:坐标偏移、器件选型都可做成变量 |
-| 步骤策略 | `defaults.*` / 步内字段 | `--timeout` `--retry` | 步内字段 > CLI > defaults(步内是作者意图,最高) |
-| 确认门控 | 步内 `confirm:true` | `--yes` 整册放行 | 与现有 CLI destructive 门控语义一致 |
-| journal 路径 | — | `--journal <path>` | 默认 `<playbook>.journal.jsonl` |
-
-### 步骤字段参考
-
-```jsonc
-{
-  "id": "place-u1",          // 可选;缺省 = "s<序号>"。resume/区间执行按它定位
-  "name": "放置主控",         // 可选,人读注释
-  // ↓ 二选一(互斥)
-  "action": "schematic.component.place",   // typed action(daemon 校验 payload)
-  "run": "pcb auto-place",                  // Cobra 子命令(复合工具层)
-  // ↓ 参数(均支持 ${var} 替换;action 用 payload,run 用 flags/args)
-  "payload": { "libraryUuid": "${LIB}", "x": 760, "y": 430 },
-  "flags":   { "assembly-gap": 40, "dry-run": false },   // → --assembly-gap 40
-  "args":    ["P1"],                                      // 位置参数(如 doc open P1 或 doc switch P1)
-  // ↓ 结果取值 → 变量(JSONPath,作用于该步 JSON 结果的 result 体)
-  "capture": { "U1": "$.primitiveId" },
-  // ↓ 门禁(JSONPath: 判定式;全过才算步骤成功)
-  "assert":  { "$.overlaps": "==0", "$.score": ">=95" },
-  "onFail":  "stop",         // stop(默认)| continue | prompt(交互询问)
-  // ↓ 执行策略(覆盖 defaults)
-  "timeoutSec": 60, "retry": 2, "continueOnError": false,
-  // ↓ 其他
-  "confirm": true,           // 执行前询问(--yes 放行);delete/clear/import 类自动置真
-  "checkpoint": true,        // 语义标记:此步后进度已落盘(报告里高亮)
-  "notify": "P3 完成"        // 纯提示步(与 action/run 互斥):easyeda notify 弹给用户
-}
-```
-
-**判定式语法**:`"==N" "!=N" ">=N" "<=N" ">N" "<N" "==字符串" "exists" "true" "false"`。
-**变量替换**:任何字符串值里的 `${NAME}`;未定义即该步硬错(`--dry-run` 预检能查出
-纯静态未定义;依赖 capture 的推迟到运行时)。**无条件分支、无循环**(见设计决策 1)。
-
-原理图计算与 Apply 使用 `expectSchematic` 校验真实回读，按位号/引脚编号匹配，
-不依赖返回数组顺序。仅允许用于 `schematic.components.list` 且 `includePins:true`：
+## 文件格式 v1
 
 ```json
-{"action":"schematic.components.list","payload":{"includePins":true},
- "expectSchematic":{"exactParts":true,"parts":{
-   "C1":{"primitiveId":"${C1_PID}","x":400,"y":250,"rotation":90,"mirror":false,
-     "pins":{"1":{"x":400,"y":270,"net":"+3V3"},"2":{"x":400,"y":230,"net":"GND"}}}
- }}}
-```
-
-每个器件必须列齐全部引脚；`exactParts:true` 同时拒绝额外器件（忽略 sheet、flags）。
-`primitiveId`、位置、旋转、镜像可省略，几何数值容差为 `1e-6`；省略 `net` 用于接线前的
-几何预检，最终验收应给每脚指定黄金网名。指定网名时，未知/null、空网名、错网均失败，
-显式 `net:null` 本身也无效。此守卫读回失败或比对失败直接终止并写 journal，
-`retry`、`verify`、`onFail:continue` 和 `continueOnError` 均不能绕过。
-
-### journal 与断点续跑
-
-`<playbook>.journal.jsonl`,首行头 `{playbookSha256, startedAt, project}`,其后每步一行:
-
-```json
-{"idx":3,"id":"place-u1","status":"ok","ms":1240,"captured":{"U1":"be7f…"},"digest":"…"}
-```
-
-- `--resume`:跳过 journal 中 `ok` 的步骤,**captured 变量从 journal 恢复**(否则后步引用断链);
-- playbook 内容变更(sha 不匹配)→ 拒绝 resume,提示 `--from` 手动定位;
-- 退出码:0 全过;1 有步骤失败;2 格式/预检错误。执行中每步打印
-  `[3/60] place-u1 … ok (1.2s)`,`--quiet` 静默,收尾输出汇总(含 journal 路径)。
-
-### 完整示例(本轮实战原理图阶段的等价物,节选)
-
-```jsonc
 {
   "version": 1,
-  "meta": { "name": "esp32-mini-sch", "project": "ceshi", "doc": "P1" },
-  "vars":  { "LIB": "0819f05c4eef4c71ace90d822a990e87" },
+  "requireFullExecution": true,
+  "meta": {
+    "name": "power-composition",
+    "project": "<project-uuid>",
+    "doc": "<page-uuid>"
+  },
+  "defaults": {"timeoutSec": 90, "retry": 0, "continueOnError": false},
+  "vars": {},
   "steps": [
-    // ① typed action + 结果取值存变量
-    { "id": "place-u1", "action": "schematic.component.place",
-      "payload": { "libraryUuid": "${LIB}", "uuid": "ebc5227e…", "x": 760, "y": 430 },
-      "capture": { "U1": "$.primitiveId" } },
-    // ② 引用前步捕获的变量(id 每次会话会变,静态脚本无法跨会话复现)
-    { "id": "desig-u1", "action": "schematic.component.modify",
-      "payload": { "primitiveId": "${U1}", "patch": { "designator": "U1" } } },
-    // ③ CLI 复合命令层
-    { "id": "autoconnect", "run": "sch autoconnect",
-      "flags": { "spec": "connect.json" }, "timeoutSec": 300 },
-    // ④ 门禁:失败即停
-    { "id": "gate-lint", "run": "sch layout-lint", "flags": { "json": true },
-      "assert": { "$.overlaps": "==0" }, "onFail": "stop" },
-    // ⑤ 检查点存盘 + 提示
-    { "id": "save-1", "action": "schematic.save", "checkpoint": true },
-    { "id": "note", "notify": "S3 放置完成,进入布线" }
+    {
+      "id": "verify-unwired-page",
+      "action": "schematic.components.list",
+      "payload": {"includePins": true, "includeWires": true, "includeConnectivitySummary": true},
+      "assert": {
+        "$.connectivitySummary.scope": "==activePage",
+        "$.connectivitySummary.wires": "==0",
+        "$.connectivitySummary.buses": "==0"
+      }
+    },
+    {
+      "id": "save",
+      "action": "schematic.save",
+      "assert": {"$.saved": "true"},
+      "checkpoint": true
+    }
   ]
 }
 ```
 
-调用与复写示例:
+上例展示格式和运行时计数检查；实际组合队列还必须包含下述完整器件、引脚与绘图守卫。
+`meta.window` 可选。每步使用 `action` + `payload`、`run` + `flags/args` 或 `notify`
+三者之一；`run` 是 CLI 子命令，例如 `sch gate`，不执行 shell。
 
-```bash
-easyeda apply sch.playbook.json                       # 按 meta.project=ceshi 跑
-easyeda apply sch.playbook.json --project demo2       # 同一份打到另一工程
-easyeda apply sch.playbook.json --var LIB=其他库uuid   # 参数化复写
-easyeda apply pcb.playbook.json --resume              # 断点续跑
+| 步骤字段 | 用途 |
+|---|---|
+| `id` / `name` | 稳定步骤 ID / 可选说明；未给 ID 时使用步骤序号。 |
+| `capture` | 将结果中的值存为变量，例如 `{"C1_PID":"$.primitiveId"}`。后续用 `${C1_PID}` 引用。 |
+| `assert` | 对结果断言；字段缺失或不满足条件即失败。 |
+| `timeoutSec` / `retry` / `continueOnError` | 覆盖默认执行策略；变更动作失败不自动重试。 |
+| `confirm` | 确认门控，`--yes` 放行；清除/删除等动作默认需要确认。 |
+| `checkpoint` | 日志语义标记，本身不会保存；需要真实 `schematic.save` 步骤。 |
+| `verify` | 普通步骤失败后执行的只读核对；成功可将原步骤记为 `ok(verified)`，不能绕过强制状态守卫。 |
+
+`capture/assert` 路径相对于响应的 `result`，支持 `.key` 和 `[index]`，不支持筛选表达式。
+判定式支持数值比较、`==字符串`、`exists`、`true/false` 和 `len==N/len>=N/len<=N` 等长度比较。
+所有字符串值支持 `${变量}`；没有条件分支或循环，生成侧须先展开步骤。
+
+## `expectSchematic`：完整回读约束
+
+只用于 `schematic.components.list` 且要求 `includePins:true`。按位号和引脚编号匹配，
+与数组返回顺序无关；每个被检查器件必须列齐全部引脚。
+
+```json
+{
+  "action": "schematic.components.list",
+  "payload": {"includePins": true, "includeBBox": true},
+  "expectSchematic": {
+    "exactParts": true,
+    "parts": {
+      "C1": {
+        "primitiveId": "${C1_PID}", "x": 400, "y": 250,
+        "rotation": 90, "mirror": false,
+        "pins": {
+          "1": {"x": 400, "y": 270, "net": "+3V3", "noConnected": false},
+          "2": {"x": 400, "y": 230, "net": "GND", "noConnected": false}
+        }
+      }
+    }
+  }
+}
 ```
 
-### 错误处理(定稿——步骤间息息相关,默认从严)
+| 字段 | 检查规则 |
+|---|---|
+| `exactParts:true` | 拒绝额外器件；sheet、flags 不计入器件集合。 |
+| `parts` | 必填 map。可选 `primitiveId/x/y/rotation/mirror/bbox`；几何容差 `1e-6`，检查 bbox 时必须 `includeBBox:true`。 |
+| `pins.*.net` | 省略表示本步不检查网络，可用于接线前几何检查。最终验收应逐脚写明 net/NC。 |
+| `pins.*.noConnected` | 显式布尔值；已知空网 `net:""` 必须配合它。`true` 与非空 net 冲突，`net:null`、`noConnected:null` 无效。 |
+| `absentParts` | 列出的位号必须在本次观察范围内不存在；不能为空位号、重复或与 `parts` 冲突。 |
+| `drawing:{wires,flags}` | 比较真实导线路径、标记位置与方向，要求 `includeWires:true`；同网但绕线不同会失败。 |
 
-1. **默认即最严:失败即终止。** 步骤互相依赖(后步引用 capture 变量、假设前步已生效),
-   带病续跑必然放大破坏。任何执行错误或 assert 不过 → 终止整册、退出码 1、醒目报错
-   (步骤 id / 动作 / payload 摘要 / 错误详情 / journal 路径 / `--resume` 提示)。
-2. **默认重试,但按「可否安全重试」分类**(出厂 `defaults.retry: 2`,退避 2s→5s):
-   - **只读步骤**(catalog `Mutates:false` 或 run 白名单 list/check/lint/drc):超时、
-     连接器忙、无窗口 → 自动重试 ✓;
-   - **变更类步骤超时:不自动重试,直接 stop**——平台实测超时的 mutation 可能**已生效**
-     (本项目踩过:place 超时但器件已落板),盲重试 = 双重放置。报错时附提示:
-     「变更可能已生效,先用 verify/读回确认,再 --resume」。
-   - payload 校验错、变量未定义等确定性错误:不重试,直接 stop。
-3. **`verify` 块 = 「停下来检查校验」的机器化**(可选,变更类步骤强烈建议):
-   ```jsonc
-   { "id": "place-u1", "action": "schematic.component.place", "payload": { … },
-     "verify": { "action": "schematic.components.list",
-                 "assert": { "$.components[?(@.designator=='U1')]": "exists" } } }
-   ```
-   步骤失败/超时后先跑 verify:**过 = 视为已生效,继续**;不过 = 按第 2 条重试/终止。
-   这让「超时但其实成功」不再需要人工介入。
-4. **人工介入回路**:stop 后 journal 保留全部状态(含 captured 变量)→ 人/agent 检查修复
-   → `--resume` 原地续跑(或 `--from <id>` 指定)。
-5. `onFail: continue` 仅限显式标注的非关键步骤(notify/截图);`prompt` 交互决定。
+空 `parts:{}` 有两种合法含义：
 
-## 关键设计决策
+```json
+{"exactParts": true, "parts": {}}
+```
 
-1. **刻意不做编程语言**——无条件分支、无循环。60 行数据就是 60 步。生成侧(agent/
-   audit 导出)负责展开循环;回放侧保持傻瓜化、可 diff、可断点。这是与"再写一门脚本
-   语言"的本质区别。
-2. **双层寻址**:`action:`(typed action,daemon 校验 payload)+ `run:`(Cobra 子命令
-   层)。缺一不可——复合工具都在 CLI 层。
-3. **变量捕获是复现的命门**:primitiveId/坐标每次会话都变(load-bearing gotcha:
-   pull fresh pids before mutating),`capture` + `${}` 替换让同一份文件跨会话可复现。
-4. **journal 即状态**(`<file>.journal.jsonl`,每步一行 id/status/耗时/结果摘要):
-   `--resume` 跳过已完成;超时/崩溃后原地续跑——本轮 place 阶段 2 分钟超时被迫改后台
-   脚本的问题从根上消失。
-5. **审计日志 → playbook 导出**是杀手级闭环:探索性会话跑完,
-   `easyeda audit export --playbook` 直接得到干净步骤文件 → 提交为回归用例。
-   esp32 案例可固化为 `examples/esp32-mini/{schematic,pcb}.playbook.json`。
-6. **确认门控延续**:destructive 步骤(delete/clear/import_changes)默认逐步询问,
-   `--yes` 整册放行(与现有 CLI 门控语义一致)。
-7. **平台坑封装成"宏步骤"**:如 `run: pcb via-hop`(#31 的 fill 键合 workaround)、
-   PLANE 翻转配方——playbook 引用宏,不要求用户知道坑。
+检查器件集合为空。清页仍须额外运行 `sch clear --dry-run --expect-empty`，检查导线、
+标记、图形等全部图元；枚举失败或残余图元不能当空页。
 
-## 实现落点
+```json
+{"parts": {}, "absentParts": ["U1", "C1"]}
+```
 
-- `internal/app/cmd_apply.go`:解析 + 变量替换 + journal + 逐步分发(action → daemon
-  `/action`;run → 进程内调用对应 Cobra 命令,复用既有实现,零重复)。
-- `internal/app/cmd_audit.go`:`audit export --playbook`(审计条目 → 步骤,过滤只读
-  action,合并 save)。
-- Skill 同步:`references/actions.md` 增补 apply 章节;design-flow 各阶段附
-  「可导出为 playbook」提示。
-- 回归:`make lint-test` 加 playbook 格式 fixture;examples/ 下放 esp32 案例双文件。
+只要求这些位号不存在，允许其他器件存在。Compose 使用全页 inventory 检查新增位号未被
+其他页占用，并保存目标页已有器件的完整基线；目标页另用 `exactParts:true` 严格核对。
+既没有 `exactParts:true` 又没有非空 `absentParts` 的空 `parts` 会被拒绝。
 
-## 验收(探针轮次 #2 的一部分)
+`reuseUnwired` 同时要求完整的器件/引脚几何匹配、空 `drawing`、无冲突 NC，及活动页
+`connectivitySummary.wires/buses` 均为零。执行时再次回读并断言 summary；缺失、范围错误
+或出现新导线/总线即停止，不能只信编译时快照。CLI `sch list --include-wires` 同时读取 summary。
 
-用两份 playbook(sch + pcb)从零重放 esp32MiniRequire 全程,人工零脚本,
-门禁步骤全过 → 即宣告 B 列「批量编排」缺口关闭。
+`expectSchematic` 的读取或比对失败必须停止并写 journal；`retry`、`verify`、
+`onFail:continue` 和 `continueOnError` 不能绕过它。`expectedConnectivity` 同样是强制连接守卫。
+
+## 失败与恢复
+
+journal 默认写入 `<playbook>.journal.jsonl`，头部记录文件哈希与目标，逐步记录 ID、
+状态、耗时、错误和捕获变量。执行日志可定位停止在哪一项；它不撤销已经落地的动作。
+
+只读步骤可按策略重试临时故障；变更步骤超时可能已经生效，不自动重复写入。
+先保存 journal、回读目标，确认器件、引脚、线和标记的真实状态，再决定修正数据或重新规划。
+普通队列的 `--resume` 会恢复已成功步骤的捕获变量，并拒绝文件哈希变化；受保护队列始终
+重新生成并完整执行。不要把离线预检成功、WebSocket 返回成功或保存成功单独写成最终验收通过。
+
+器件期望可带 `device:{libraryUuid,uuid}`，需 `includeDeviceIdentity:true` 读取水合后的器件库身份；同符号不同料号不算匹配。`drawing` 还需 `includeConnectivitySummary:true`，当前页 buses/shortSymbols 必须明确为零。

@@ -632,3 +632,24 @@ moves via `component.modify` then self-checks with layout-lint. A big part on an
 already-full page honestly reports **"no free slot"** rather than overlapping — use
 `--all` so it gets first pick, or free up room. Verified live: 3 stacked parts →
 `--apply` → 0 overlap.
+
+### 从 Lib 数据组合单页
+
+`sch compose --from composition.json --out plan.json --before target-snapshot.json --playbook apply.json`
+将完整 1.4 IR 与模块的器件/导线/标记几何组合到同一页；覆盖不同的已有目标需显式
+`--replace`。先看本地容纳与连接验证结果，再完整执行 SCH Apply。页边/模块间距固定
+10 raw，框内至少10，标题净距5；图签 keepout不占用。旧 `materialize` 的逐脚标签
+不能代替该链路。字段与验证边界见 `docs/schematic-page-composition.md`。
+
+组合规划复用 `sch check` 的标记本体与文字带模型，逐段检查导线是否穿过标记或文字；
+同网也要避让，正常引线可终止在锚点。队列按 Lib 登记幂等虚拟组（`group create --if-absent`），
+以完整 `sch gate --strict` 作为最终门。
+
+器件及全部引脚几何已正确、尚无导线/标记时，可从新鲜快照编译 `reuseUnwired` 队列保留器件。
+必须同时确认无冲突 NC、`connectivitySummary.scope:activePage` 且 `wires/buses` 为零；
+执行前再次回读并断言，缺失或变化即停止。它仍是完整 Apply，不使用 `--resume`。
+`sch list --include-wires --include-device-identity` 同时读取 summary 与真实器件库身份；最终绘图拒绝额外总线/短接符号，新增位号通过 `absentParts` 检查其他页未占用。
+
+单页不足可按功能拆成两页：给不同目标页分别提供完整的单页器件子集，各运行一次
+`compose`。命令不自动分页或删除源页；目标位号跨页重复仍会拒绝。最终迁移必须处理
+源页归属，不能复制后留下重复器件。

@@ -36,13 +36,14 @@ typed CLI 操作嘉立创EDA专业版的原理图——每个动作可观测、�
 
 | 能力 | 命令 | 说明 |
 |---|---|---|
+| 单页 Lib 组合 | `sch compose --from ... --out ... --before ... --playbook ... [--replace]` | 完整IR与模块几何→紧凑标题、Z等高排布、固定10 raw边距；实际引脚/NC/bbox/导线路径回读。跨页位号唯一才许重建；[范围](../schematic-page-composition.md) |
 | 固定 LDO 数据规划 | `sch power-layout --from ... --out ... --playbook ...` | 实测几何→器件/引脚/线/电源符号/模块框;标题择上下空档压缩包络后,默认左上 Z 字起排、统一行高;输入可带实测 `titleMetrics`;`--frames-only` 只验证并补框 |
 | 模块呈现转换 | `sch frame apply/check --from ...` | JSON→粉色虚线框+0.2 inch 标题;按页面和模块记录 ID,回读样式/实际文字边界;可选 `titleLayout` 核验预测包络和障碍物净距,重复 Apply 不增图元 |
 | 模块感知自动布局 | `sch autolayout` | 双引擎:`template`(spec 驱动,核心放分区中心+外围环绕,确定性,布线前用)/ `official`(平台 @beta 兜底,破坏性,`--rewire` 网表重建) |
 | 空隙打包 | `sch autoplace-free` | 无分区场景往空白处塞件 |
 | 对齐/等距 | `sch align` / `sch distribute` | 按渲染 bbox 对齐(left/right/top/…)/ 单轴等距摊开;默认 dry-run;选集**部分覆盖**持久组时硬拒绝(`--break-group` 显式放行) |
 | 刚体平移 | `sch group-move` | 器件+桩线+flag 一起搬:`--ids`(无状态,每次传全 id)或 `--group <id>`(持久组,成员桩线+远端 flag **自动展开**,触碰非成员脚的线树留在原地并报告) |
-| 持久化编组 | `sch group create/list/add/remove/ungroup` | **virtual group**(平台墙真机坐实:EasyEDA Pro 3.2.121 的 `eda.*` 无编组 API,组件实例 70 个方法/属性零 group/parent 字段——UI 原生组对扩展完全不可见;后经用户 UI 实建 Group1 复核:44 图元全状态前后差分 0、selection 三种读法含私有属性零组字段,与 virtual group 并存不冲突)。按 documentUuid 存 workflow state(同 zones claims 模式);成员存**位号**(netlist key,页内稳定;primitiveId 在 wire 重建/reload 时会变),move 时解析当前 id;同一位号只属一个组(入组查重报所在组);组空自动删;`list` 标 stale 成员;autolayout/autoplace-free 检测到组时警告(v1 不保组内相对几何) |
+| 持久化编组 | `sch group create/list/add/remove/ungroup` | **virtual group**(平台墙真机坐实:EasyEDA Pro 3.2.121 的 `eda.*` 无编组 API,组件实例 70 个方法/属性零 group/parent 字段——UI 原生组对扩展完全不可见;后经用户 UI 实建 Group1 复核:44 图元全状态前后差分 0、selection 三种读法含私有属性零组字段,与 virtual group 并存不冲突)。`create --if-absent` 仅在名称、成员及来源均相同才保持不变。按 documentUuid 存 workflow state(同 zones claims 模式);成员存**位号**(netlist key,页内稳定;primitiveId 在 wire 重建/reload 时会变),move 时解析当前 id;同一位号只属一个组(入组查重报所在组);组空自动删;`list` 标 stale 成员;autolayout/autoplace-free 检测到组时警告(v1 不保组内相对几何) |
 | 布局硬门 | `sch layout-lint` | 真实渲染 bbox 查重叠(ERROR 非零退出)/紧间距/off-grid/分区违规 |
 | 组内布局计算 | `sch group tidy` | **三层体系 Group 层**:pattern auto/power-updown/signal-row——双电源旗电容自动竖放+上电下地+**文字朝外**(真机校准 rotation 表);实测 pin 二义消解、stale 双读、未建模第三连接拒绝、连带断开即错、自检红即逐步回滚 |
 | 功能区刚移 | `sch zone move` | **Zone 层**:区内组+散件+桩+旗+note 整体平移;**全区一份展开**(区内直连线随行,跨区线才留守);出界/压图签硬拒、压他区警告;分区框自动重画(重画前指纹 settle) |
@@ -94,10 +95,10 @@ typed CLI 操作嘉立创EDA专业版的原理图——每个动作可观测、�
 | 断开引脚的 stub+flag | `sch disconnect --pin C4:1` | ⚠ 不是 `--designator C4 --pin 1` 两参式 | 也可 `--flag-id`/`--wire-id` |
 | 挪器件/改属性 | `sch modify --id <pid> --x 100 --y 200` | 复杂属性(customAttributes 等)走 `--patch '{json}'` | flag 与 patch 可并用,flag 覆盖同名键 |
 | 删图元(任意类型) | `sch prim-delete --ids id1,id2` | 旧 `sch delete`(仅器件)**已移除** | `--ids` 是 **CSV**(JSON 数组已不再接受) |
-| 清整页 | `sch clear` | — | 破坏性,先 dry-run/确认 |
+| 清整页 | `sch clear` | — | 残留或枚举警告非零退出；`--dry-run --expect-empty` 只读验证所有非图纸图元为空 |
 | 列页/切页 | `sch pages` / `sch open` | `doc ls`/`doc switch` 是跨域老入口,功能重叠 | sch 域内优先用 sch 命令 |
 | 出图给人看 | `sch export-image` | `snapshot` 是**视口截图**(需前台、会 stale) | export 不依赖前台 |
-| 读电路状态 | `sch read`(=list+nets+check 聚合) | 只要器件清单用 `list`;只要检查用 `check` | read 最贵但一次拿全 |
+| 读电路状态 | `sch read`(=list+nets+check 聚合) | 只要器件清单用 `list`;合页快照加 `--include-bbox --include-pins --include-wires`;只要检查用 `check` | read 最贵但一次拿全 |
 | 分区框(整纸版式) | `zones set` → `zone-plan`(校验)→ `zone-draw --mode partition` | ⚠ 固定九宫格 claim 对宽模组会误报 zone-violation——partition 画完后 `zones clear` | 三段链,顺序固定 |
 | 整组挪动(免收集 id) | `sch group-move --group g1`(先 `sch group create --members …`) | `--ids` 是**无状态**老路:每次手工传全部 primitiveId | 两 flag 互斥;`--group` 存位号、move 时解析 id,并自动带上成员桩线+远端 flag。**移动目的地保持净空**:把组临时压到其他电路上再搬走(如 ±100 往返测试)会造成"树终止于异脚"的接触歧义(与真连线几何不可分),个别桩可能按真连线保留原地并报 note——真实用途(挪到空白区)无此问题,压他人电路本身就是 layout-lint 会拦的违规布局 |
 | 建裸网络标志 | **尽量别用** `sch netflag` | 裸 flag 不经 wire = 假连接(铁律 9) | 用 connect/autoconnect |

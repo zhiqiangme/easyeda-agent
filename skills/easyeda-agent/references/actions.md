@@ -225,3 +225,22 @@ easyeda sch apply .easyeda/tmp/plan.json --window <id>
 先前已落地的动作保留并记录 journal。保护计划禁止目标覆盖、`--resume`、`--from/--to`，
 失败后重新导出实际快照再规划。内部 run 子命令继承目标页守卫。
 离线结构检查用于规划；执行时回读用于证明写入，二者职责不同。
+
+`sch compose` 将完整 Lib 几何编译为受保护队列：create 使用零旋转，再用绝对 modify
+设置已测位置与朝向；接线前核对实测 bbox/全部引脚，最终 `expectSchematic` 核对
+net/NC、导线路径及标记方向。清页后用 `sch clear --dry-run --expect-empty` 检查全图元，
+枚举警告不能当空页。新增位号用 `absentParts` 检查工程内未被占用；空 `parts:{}`
+须配合 `exactParts:true`（空集合）或非空 `absentParts`（允许其他器件）。
+
+器件几何已匹配且未接线时，`reuseUnwired` 可以保留器件，但必须有空导线/标记、无冲突
+NC 和活动页 `connectivitySummary.wires/buses == 0` 的证据。执行时再次断言 summary，
+缺失或变化即停止；仍完整执行全部守卫，不能 `--resume`。`sch list --include-wires`
+同时读取 summary。已完全匹配时保留电路，继续模块框及最终验收。
+
+规划逐段拦截导线穿过标记本体/文字，同网也不能穿字；正常引线可终止在锚点。
+按 Lib 登记 `sch group create --if-absent`，同名组仅在完整成员和溯源/角色完全一致时
+复用，再通过 `sch gate --strict`。单页不足可按功能拆两页，每页提供完整且位号不重复的
+器件子集，分别运行 `compose`；命令不自动分页或删除源页。完整契约见
+`docs/schematic-page-composition.md` 与 `docs/design-apply-playbook.md`。
+
+compose 的 before 快照需 `sch list --include-device-identity`；Apply 同时比对 canonical 器件库 UUID。drawing 守卫要求当前页总线/短接符号计数为零，缺失计数不能判为无额外图元。

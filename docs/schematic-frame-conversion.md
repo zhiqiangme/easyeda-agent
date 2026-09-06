@@ -29,6 +29,7 @@
 }
 ```
 
+- 页面边距、框内最小边距、模块/行间距、标题内缩均为 **10 raw（0.1 inch / 2.54 mm）**；标题净距为5 raw。统一行高或网格取整允许增加留白，图签保留同样10 raw净距。
 - 坐标为 0.01 inch，y 向上；0.2 inch 标题对应 `fontSize=20`。
 - `id` 是页面内稳定的模块标识。`rect` 是几何包围盒；官方矩形起点转换为
   `(minX,maxY)`，宽高分别为 `maxX-minX` 与 `maxY-minY`。
@@ -44,7 +45,7 @@
 - 各模块先完成上述紧凑包络，再按功能顺序从左上角向右排，行满进入下一行；所有行采用最大模块高度，
   框的上下边对齐。计算出的位移同时作用于模块内所有器件、引脚、导线及标记。
   `power-layout` 默认使用左上起排；`--at` 明确指定核心坐标时保留该位置，
-  `--frames-only` 使用现有位置。五模块双行规划已有离线回归，尚不代表多模块完整 Apply。
+  `--frames-only` 使用现有位置。`sch compose` 接受任意已绘制的 Lib 模块数据并编译单页队列，见 [组合契约](schematic-page-composition.md)。
 
 `power-layout` 的输入快照可在顶层提供
 `titleMetrics: {"title":"POWER / AMS1117-3.3","fontSize":20,"width":189.022171,"height":20}`，

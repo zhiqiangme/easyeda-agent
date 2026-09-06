@@ -27,8 +27,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -135,6 +137,61 @@ func groupsCreate(groups []*schGroup, name string, members []string) ([]*schGrou
 		Members: norm, At: time.Now().Format(time.RFC3339),
 	}
 	return append(append([]*schGroup(nil), groups...), g), g, nil
+}
+
+// groupsCreateWithProvenance makes an explicitly named declaration replayable.
+// A same-name group is reusable only when the entire member set and provenance
+// match; a subset must never silently inherit a larger group's membership.
+func groupsCreateWithProvenance(groups []*schGroup, name string, members []string, blockID, instance string, roles map[string]string, ifAbsent bool) ([]*schGroup, *schGroup, bool, error) {
+	name, blockID, instance = strings.TrimSpace(name), strings.TrimSpace(blockID), strings.TrimSpace(instance)
+	norm := normalizeDesignators(members)
+	if len(norm) == 0 {
+		return nil, nil, false, fmt.Errorf("--members is required (CSV of designators)")
+	}
+	if ifAbsent && name == "" {
+		return nil, nil, false, fmt.Errorf("--if-absent requires --name to identify the exact group declaration")
+	}
+	if blockID == "" && (instance != "" || len(roles) > 0) {
+		return nil, nil, false, fmt.Errorf("--instance/--roles require --block-id")
+	}
+	for role, ref := range roles {
+		if !slices.Contains(norm, ref) {
+			return nil, nil, false, fmt.Errorf("--roles %s=%s:位号 %s 不在 --members 里(roles 只能指向本组成员)", role, ref, ref)
+		}
+	}
+	if ifAbsent {
+		var existing *schGroup
+		for _, g := range groups {
+			if g != nil && strings.EqualFold(g.Name, name) {
+				if existing != nil {
+					return nil, nil, false, fmt.Errorf("group name %q is ambiguous (%s, %s); cannot apply --if-absent", name, existing.ID, g.ID)
+				}
+				existing = g
+			}
+		}
+		if existing != nil {
+			if !slices.Equal(normalizeDesignators(existing.Members), norm) || existing.BlockID != blockID || existing.Instance != instance || !maps.Equal(existing.Roles, roles) {
+				return nil, nil, false, fmt.Errorf("group %s conflicts with --if-absent: complete members, block-id, instance and roles must match", describeSchGroup(existing))
+			}
+			for _, g := range groups {
+				if g == nil || g == existing {
+					continue
+				}
+				for _, ref := range normalizeDesignators(g.Members) {
+					if slices.Contains(norm, ref) {
+						return nil, nil, false, fmt.Errorf("%s also belongs to group %s; cannot reuse conflicting group membership", ref, describeSchGroup(g))
+					}
+				}
+			}
+			return groups, existing, true, nil
+		}
+	}
+	next, g, err := groupsCreate(groups, name, norm)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	g.BlockID, g.Instance, g.Roles = blockID, instance, maps.Clone(roles)
+	return next, g, false, nil
 }
 
 // groupsAddMembers adds members to an existing group (same one-group-per-part
@@ -1071,6 +1128,7 @@ at most one group per page.`,
 	// ── create ──
 	{
 		var membersRaw, name, blockID, instance, rolesRaw string
+		var ifAbsent bool
 		c := &cobra.Command{
 			Use:   "create",
 			Short: "Create a group from member designators (CSV); id is auto-assigned (g1, g2, …)",
@@ -1082,7 +1140,11 @@ provenance fields ` + "`sch block-apply`" + ` registers automatically, so a grou
 registration was lost (e.g. eaten by a stale group before the delete-cascade
 fix) can be re-registered BY HAND and regain ` + "`sch reconcile`" + `'s mechanical
 netlist audit. reconcile needs BOTH --block-id and --roles (role→designator);
---block-id alone records provenance but cannot be audited yet.`,
+--block-id alone records provenance but cannot be audited yet.
+
+--if-absent requires --name and reuses a same-name group only when the complete
+member set, block-id, instance and roles match. Any conflicting declaration is
+an error; an exact match leaves the registry and its timestamps unchanged.`,
 			Example: `  easyeda sch group create --members R1,C5,U2
   easyeda sch group create --members U1,C1,C2 --name mcu-core
   # 手工恢复块溯源(reconcile 需要 --block-id + --roles):
@@ -1097,25 +1159,22 @@ netlist audit. reconcile needs BOTH --block-id and --roles (role→designator);
 				if blockID == "" && (strings.TrimSpace(instance) != "" || len(roles) > 0) {
 					return fmt.Errorf("--instance/--roles 需要与 --block-id 一起使用(它们描述的是块实例的溯源)")
 				}
+				if ifAbsent && strings.TrimSpace(name) == "" {
+					return fmt.Errorf("--if-absent requires --name to identify the exact group declaration")
+				}
 				_, _, docUUID, project, st, groups, err := loadSchGroupsContext(cfg, *window)
 				if err != nil {
 					return err
 				}
-				next, g, err := groupsCreate(groups, name, splitDesignators(membersRaw))
+				next, g, unchanged, err := groupsCreateWithProvenance(groups, name, splitDesignators(membersRaw), blockID, instance, roles, ifAbsent)
 				if err != nil {
 					return err
 				}
+				if unchanged {
+					fmt.Fprintf(stdout, "✓ unchanged group %s — %d member(s): %s (project %q, page %s)\n", describeSchGroup(g), len(g.Members), strings.Join(g.Members, ","), project, docUUID)
+					return nil
+				}
 				if blockID != "" {
-					member := map[string]bool{}
-					for _, m := range g.Members {
-						member[m] = true
-					}
-					for r, d := range roles {
-						if !member[d] {
-							return fmt.Errorf("--roles %s=%s:位号 %s 不在 --members 里(roles 只能指向本组成员)", r, d, d)
-						}
-					}
-					g.BlockID, g.Instance, g.Roles = blockID, strings.TrimSpace(instance), roles
 					if _, ok, berr := blocks.Get(blockID); berr != nil || !ok {
 						fmt.Fprintf(stderr, "warn: 块库里没有 %q(easyeda blocks ls 查可用块)—— 溯源已记录,但 reconcile 会把该组列为「对不了账」\n", blockID)
 					}
@@ -1137,6 +1196,7 @@ netlist audit. reconcile needs BOTH --block-id and --roles (role→designator);
 		}
 		c.Flags().StringVar(&membersRaw, "members", "", "member designators — CSV: R1,C5,U2 (required)")
 		c.Flags().StringVar(&name, "name", "", "optional human-readable group name")
+		c.Flags().BoolVar(&ifAbsent, "if-absent", false, "reuse only an exactly matching named group; conflicting members/provenance fail (requires --name)")
 		c.Flags().StringVar(&blockID, "block-id", "", "块溯源:这个组实例化自哪个块(如 block.sy8089_buck)— 让 `sch reconcile` 能机械对账")
 		c.Flags().StringVar(&instance, "instance", "", "块实例 id(同一实例的多个子群靠它合并对账;需与 --block-id 同用)")
 		c.Flags().StringVar(&rolesRaw, "roles", "", "role→位号映射 — CSV: ROLE=R1,LED=LED1(reconcile 必需;需与 --block-id 同用)")
