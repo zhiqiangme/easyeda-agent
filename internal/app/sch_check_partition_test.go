@@ -161,10 +161,10 @@ func TestPartitionFindingForZones_PositiveAndNegative(t *testing.T) {
 		wantNote    bool
 	}{
 		{"正对照:块驱动页,记账丢了但画布有 3 个框 + 3 条说明", 3, 3, 6, 3, false, false},
-		{"负对照 A:有虚拟组但一个框都没画", 0, 0, 0, 3, true, true},
-		{"负对照 B:一片散件,无组无框", 0, 0, 0, 0, true, true},
+		{"负对照 A:有虚拟组但一个框都没画", 0, 0, 0, 3, true, false},
+		{"负对照 B:一片散件,无组无框", 0, 0, 0, 0, true, false},
 		{"负对照 C:只写了说明没画框(标题数为 0)", 0, 0, 3, 3, true, false},
-		{"负对照 D:画了框但一条说明没有", 3, 3, 3, 3, false, true},
+		{"负对照 D:画了框但一条说明没有", 3, 3, 3, 3, false, false},
 		{"低于阈值:一条都不报", 0, 0, 0, 0, false, false},
 	}
 	for _, tc := range cases {
@@ -228,17 +228,17 @@ func TestMissingDeliverableHints_PerRealType(t *testing.T) {
 			absent:   []string{"missing-titleblock", "missing-note"},
 		},
 		{
-			name:     "只有没说明",
+			name:     "旧版 missing-note 不再给出提示",
 			findings: []checkFinding{{Type: "missing-note"}},
-			want:     []string{"missing-note", "sch note"},
-			absent:   []string{"missing-partition", "missing-titleblock"},
+			absent:   []string{"missing-note", "sch note", "missing-partition", "missing-titleblock"},
 		},
 		{
-			name: "三条齐:三条提示都给,顺序固定",
+			name: "兼容旧报告:仅框和图签给提示,顺序固定",
 			findings: []checkFinding{
 				{Type: "missing-titleblock"}, {Type: "missing-note"}, {Type: "missing-partition"},
 			},
-			want: []string{"missing-partition", "missing-note", "missing-titleblock"},
+			want:   []string{"missing-partition", "missing-titleblock"},
+			absent: []string{"missing-note", "sch note"},
 		},
 		{
 			name:     "与交付三件套无关的 finding 不触发任何提示",
@@ -261,14 +261,13 @@ func TestMissingDeliverableHints_PerRealType(t *testing.T) {
 			}
 		})
 	}
-	// 顺序:框 → 说明 → 图签。
+	// 顺序:框 → 图签。
 	all := missingDeliverableHints([]checkFinding{
 		{Type: "missing-titleblock"}, {Type: "missing-note"}, {Type: "missing-partition"},
 	})
-	if len(all) != 3 ||
+	if len(all) != 2 ||
 		!strings.Contains(all[0], "missing-partition") ||
-		!strings.Contains(all[1], "missing-note") ||
-		!strings.Contains(all[2], "missing-titleblock") {
+		!strings.Contains(all[1], "missing-titleblock") {
 		t.Fatalf("提示顺序不对:%v", all)
 	}
 }
@@ -434,7 +433,7 @@ func TestPartitionFinding_LiveEvidence(t *testing.T) {
 		}
 	})
 
-	t.Run("负对照 B:画布全空 → 照报,且 missing-note 一并报", func(t *testing.T) {
+	t.Run("负对照 B:画布全空 → 只报缺框", func(t *testing.T) {
 		writeBlockDrivenState(t, false)
 		cfg := newPartitionCheckFake(t, nil)
 		var errBuf strings.Builder
@@ -443,8 +442,8 @@ func TestPartitionFinding_LiveEvidence(t *testing.T) {
 		for _, f := range got {
 			types[f.Type] = true
 		}
-		if !types["missing-partition"] || !types["missing-note"] {
-			t.Fatalf("空白页应当两条都报,实际 %v(stderr=%s)", types, errBuf.String())
+		if !types["missing-partition"] || types["missing-note"] {
+			t.Fatalf("空白页只应报缺框,实际 %v(stderr=%s)", types, errBuf.String())
 		}
 	})
 

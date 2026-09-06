@@ -914,7 +914,7 @@ func scoreFrameFit(s *schScoreScene) schScoreDimension {
 				Target:    p.Designator,
 				Penalty:   schScoreTextOverPenalty,
 				At:        &checkPoint{X: round2(tx), Y: round2(ty)},
-				Message: fmt.Sprintf("说明文字 @(%.0f,%.0f) 压在 %s 上(重叠 %.0f×%.0f)— 移到模块框下/旁空白处(sch text-list 找 id 后 sch prim-delete + sch note 重放)",
+				Message: fmt.Sprintf("说明文字 @(%.0f,%.0f) 压在 %s 上(重叠 %.0f×%.0f)— 调整呈现数据中的文字位置后重新 Apply(sch text-list 回读核对)",
 					tx, ty, p.Designator, ox, oy),
 			})
 		}

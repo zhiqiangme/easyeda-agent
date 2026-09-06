@@ -1,21 +1,6 @@
 package app
 
-// 说明带预留 + note-outside-zone 回归。
-//
-// 第一批(REPORT-esp32mini-round2 新 1/新 2):noteBBox 高度曾写死 26(单行),
-// 多行说明结构上塞不进带、被回退链踢到框外;交付判据只有存在性三条,框外说明
-// 零告警 —— 补 note-outside-zone。
-//
-// 第二批(2026-08-19 真机复验,本文件下半部分):**只修了高度,没修宽度**。
-//   - 435 宽的说明配 435 宽的框:带内唯一候选点算出来就探出框外,再加上带内
-//     x[604,686] 被邻区 L1 的桩线占住 → 落点退到「区外走廊」,说明落在框外下方;
-//   - note-outside-zone 的修法(prim-delete 后重跑 sch note)必然死循环:重跑
-//     落在**完全相同**的坐标;
-//   - POWER_IN 区只有一个 2 脚端子,框宽 68,任何可读说明都比 68 宽 —— 结构上
-//     装不进,于是永远报警。
-// 修法:预留是**二维**的(requiredNoteWidth + requiredNoteBand),带内占用参与
-// 求解,装不下就把框**扩边/下探**而不是把说明踢出去;生成侧(planner 第二遍)
-// 与落点侧共用同一个 reserveZoneNoteArea。
+// Regression coverage for geometry retained when reading legacy zone annotations.
 
 import (
 	"reflect"
@@ -105,92 +90,6 @@ func TestSetZoneNoteSizes_PositionIndependent(t *testing.T) {
 	}
 }
 
-// ── 新 2:note-outside-zone 正负对照 ────────────────────────────────────────
-
-func TestNoteOutsideZoneFindings_PositiveAndNegative(t *testing.T) {
-	// POWER 这一区的带装得下(NoteFits/NoteAnchor 就是求解器的输出,处方直接念它)。
-	powerFrame, powerBand := layoutBBox{236, 502, 671, 754}, layoutBBox{236, 502, 671, 557}
-	px, py, powerFits := scanNoteBand(powerBand, powerFrame, 77, 39, nil, layoutBBox{0, 0, 1170, 825}, nil)
-	parts := []partitionRect{
-		{Modules: []string{"POWER"}, BBox: powerFrame, NoteBBox: powerBand,
-			NoteAnchor: [2]float64{px, py}, NoteFits: powerFits},
-		{Modules: []string{"MCU"}, BBox: layoutBBox{32, 180, 364, 760}, NoteBBox: layoutBBox{32, 180, 364, 235}},
-	}
-	zones := map[string]*workflow.SchZoneClaim{
-		"POWER":  {Parts: []string{"U1"}, NoteIDs: []string{"t-out", "t-stale"}},
-		"MCU":    {Parts: []string{"U2"}, NoteIDs: []string{"t-in"}},
-		"NOPLAN": {Parts: []string{"J9"}, NoteIDs: []string{"t-noplan"}}, // 不在分区计划里
-	}
-	texts := []zoneMoveText{
-		// 报告新 1 的真机取证坐标:SY8089 的说明 (250,445),框 {236,502}–{671,754} → 框外。
-		{ID: "t-out", X: 250, Y: 445, Content: "SY8089: 5V→3V3\n1.5MHz\n2A", FontSize: 10},
-		// 框内说明(锚点=左上,y-UP 向下排行;整个 bbox 在 MCU 框里)。
-		{ID: "t-in", X: 50, Y: 300, Content: "WROOM 模组", FontSize: 10},
-		// 未登记 zone 的自由文本:哪怕在所有框外,也绝不误伤。
-		{ID: "t-free", X: 900, Y: 60, Content: "免责声明", FontSize: 10},
-		{ID: "t-noplan", X: 900, Y: 800, Content: "无框区说明", FontSize: 10},
-	}
-	got := noteOutsideZoneFindingsFor(parts, zones, texts)
-	if len(got) != 1 {
-		t.Fatalf("恰应报 1 条(t-out),got %+v", got)
-	}
-	f := got[0]
-	if f.Type != "note-outside-zone" || f.Level != "warn" || f.PrimitiveId != "t-out" {
-		t.Errorf("finding 形态不对:%+v", f)
-	}
-	if f.At == nil || f.At.X != 250 || f.At.Y != 445 {
-		t.Errorf("必须带说明坐标:%+v", f.At)
-	}
-	for _, want := range []string{`区 "POWER"`, "236", "754", "sch note --zone POWER"} {
-		if !strings.Contains(f.Message, want) {
-			t.Errorf("Message 缺 %q:%s", want, f.Message)
-		}
-	}
-}
-
-func TestNoteOutsideZoneFindings_NoRegistrationsNoFindings(t *testing.T) {
-	parts := []partitionRect{{Modules: []string{"POWER"}, BBox: layoutBBox{0, 0, 100, 100}}}
-	zones := map[string]*workflow.SchZoneClaim{"POWER": {Parts: []string{"U1"}}}
-	texts := []zoneMoveText{{ID: "t9", X: 900, Y: 800, Content: "游离文本", FontSize: 10}}
-	if got := noteOutsideZoneFindingsFor(parts, zones, texts); len(got) != 0 {
-		t.Fatalf("未登记 zone 的文本不许误伤,got %+v", got)
-	}
-}
-
-// 告警文案两档必须**都能执行**。旧文案只有一句「prim-delete 后重跑 sch note」,
-// 在「说明比带宽」和「框只有 68 宽」两种情形下都是死循环(重跑落回同一坐标)。
-func TestNoteOutsideZoneMessage_ActionableBothWays(t *testing.T) {
-	frame := layoutBBox{236, 373, 671, 754}
-	band := layoutBBox{236, 373, 671, 528}
-	t.Run("带装得下→给算好的落点坐标", func(t *testing.T) {
-		// 处方念的是求解器落进计划的那一对(NoteAnchor/NoteFits),不再自己重算。
-		ax, ay, ok := scanNoteBand(band, frame, 120, 39, nil, layoutBBox{0, 0, 1170, 825}, nil)
-		if !ok {
-			t.Fatal("fixture 失效:这条带本该装得下")
-		}
-		msg := noteOutsideZoneMessage("POWER", zoneMoveText{ID: "t1", X: 250, Y: 435,
-			Content: "SY8089 5V→3V3\n2A 1.5MHz\n输入22uF 输出22uF", FontSize: 10},
-			partitionRect{BBox: frame, NoteBBox: band, NoteAnchor: [2]float64{ax, ay}, NoteFits: true})
-		for _, want := range []string{"--x ", "--y ", "sch note --zone POWER", "prim-delete"} {
-			if !strings.Contains(msg, want) {
-				t.Errorf("缺可执行修法 %q:%s", want, msg)
-			}
-		}
-	})
-	t.Run("带装不下→绝不建议原样重跑", func(t *testing.T) {
-		tiny := layoutBBox{116, 434, 184, 476} // 68 宽的窄带
-		msg := noteOutsideZoneMessage("POWER_IN", zoneMoveText{ID: "t2", X: 50, Y: 400,
-			Content: strings.Repeat("宽", 30), FontSize: 10},
-			partitionRect{BBox: layoutBBox{116, 434, 184, 614}, NoteBBox: tiny})
-		if !strings.Contains(msg, "别再原样重跑") {
-			t.Errorf("装不下时必须明说别原样重跑(否则就是死循环):%s", msg)
-		}
-		if !strings.Contains(msg, "缩短文字") || !strings.Contains(msg, "group-move") {
-			t.Errorf("装不下时必须给真正能改变结果的下一步:%s", msg)
-		}
-	})
-}
-
 // ── 第二批:宽度 + 带内占用 + 窄框扩边 ──────────────────────────────────────
 
 // simulateNotePlacement 复刻 placeSchNote 的**纯几何**部分(折行 → 预留 → 落点),
@@ -270,11 +169,6 @@ func TestNoteBand_WideNoteWithOccupiedBand(t *testing.T) {
 	if !bboxContains(ap.BBox, got) {
 		t.Fatalf("重算后的框必须包住落点:frame %+v note %+v", ap.BBox, got)
 	}
-	zones := map[string]*workflow.SchZoneClaim{"SY8089": {Parts: []string{"U1"}, NoteIDs: []string{"n1"}}}
-	texts := []zoneMoveText{{ID: "n1", X: x, Y: y, Content: wrapped, FontSize: 10}}
-	if f := noteOutsideZoneFindingsFor(after.Partitions, zones, texts); len(f) != 0 {
-		t.Fatalf("修复后不该再报 note-outside-zone:%+v", f)
-	}
 }
 
 // 情形 2(真机取证):窄框(68 宽,区里只有一个 2 脚接线端子)。
@@ -318,11 +212,6 @@ func TestNoteBand_NarrowZoneWidensForReadableNote(t *testing.T) {
 	ap := after.Partitions[0]
 	if ap.BBox != rect || ap.NoteBBox != band {
 		t.Fatalf("窄框扩边两侧分家:\n plan  %+v / %+v\n place %+v / %+v", ap.BBox, ap.NoteBBox, rect, band)
-	}
-	zones := map[string]*workflow.SchZoneClaim{"POWER_IN": {Parts: []string{"J1"}, NoteIDs: []string{"n1"}}}
-	texts := []zoneMoveText{{ID: "n1", X: x, Y: y, Content: wrapped, FontSize: 10}}
-	if f := noteOutsideZoneFindingsFor(after.Partitions, zones, texts); len(f) != 0 {
-		t.Fatalf("窄框扩边后不该再报 note-outside-zone:%+v", f)
 	}
 	if v := after.Validation; !v.clean() {
 		t.Fatalf("为说明扩边不许自己撑出违规:%+v", v)

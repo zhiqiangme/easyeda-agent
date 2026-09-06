@@ -33,7 +33,7 @@ func TestSchStageVerdicts_EmptyBoardIsNeverDone(t *testing.T) {
 
 func TestSchStageVerdicts_S5UnknownUntilGateRuns(t *testing.T) {
 	pages := []schPageFacts{{Name: "P1_POWER", Reachable: true, HasSheet: true, NamedWell: true,
-		Parts: 5, Wires: 12, Groups: 5, Frames: 1, Notes: 2}}
+		Parts: 5, Wires: 12, Groups: 5, Frames: 1}}
 	vs := schStageVerdicts(pages, schGateSummary{})
 	if got := stageOf(vs, "S5").State; got != schStageUnknown {
 		t.Fatalf("S5 without --gate = %q, want unknown — status 不报质量,更不能默认打勾", got)
@@ -59,7 +59,7 @@ func TestSchStageVerdicts_S6AlwaysUnknown(t *testing.T) {
 	// 平台不暴露脏标记 —— 无论画布多完整,S6 都只能是 unknown。这一条是故意的:
 	// 拿「跑过 save 命令」冒充「已存盘」正是 workflow status 撒谎的同一个病。
 	full := []schPageFacts{{Name: "P1_POWER", Reachable: true, HasSheet: true, NamedWell: true,
-		Parts: 9, Wires: 30, Groups: 9, Frames: 1, Notes: 3}}
+		Parts: 9, Wires: 30, Groups: 9, Frames: 1}}
 	if got := stageOf(schStageVerdicts(full, schGateSummary{Ran: true, Passed: 1, Total: 1}), "S6").State; got != schStageUnknown {
 		t.Fatalf("S6 = %q, want unknown even on a complete page", got)
 	}
@@ -71,7 +71,7 @@ func TestSchStageVerdicts_UnreachablePageBlocksTheVerdict(t *testing.T) {
 	// 自动伪装成全绿 —— 页越读不到,结论越乐观。语义同 gate 的 blocked:
 	// 检查器没跑完 ≠ 板子没问题。
 	pages := []schPageFacts{
-		{Name: "P1_POWER", Reachable: true, HasSheet: true, NamedWell: true, Parts: 5, Wires: 12, Groups: 5, Frames: 1, Notes: 1},
+		{Name: "P1_POWER", Reachable: true, HasSheet: true, NamedWell: true, Parts: 5, Wires: 12, Groups: 5, Frames: 1},
 		{Name: "P2_MCU", Err: "切不过去"},
 	}
 	vs := schStageVerdicts(pages, schGateSummary{})
@@ -96,7 +96,7 @@ func TestSchStageVerdicts_UnreachablePageBlocksTheVerdict(t *testing.T) {
 
 func TestSchStageVerdicts_PartialPages(t *testing.T) {
 	pages := []schPageFacts{
-		{Name: "P1_POWER", Reachable: true, HasSheet: true, NamedWell: true, Parts: 5, Wires: 12, Groups: 5, Frames: 1, Notes: 1},
+		{Name: "P1_POWER", Reachable: true, HasSheet: true, NamedWell: true, Parts: 5, Wires: 12, Groups: 5, Frames: 1},
 		{Name: "P2_MCU", Reachable: true, HasSheet: true, NamedWell: true, Parts: 6, Wires: 0, Groups: 6, Frames: 0},
 	}
 	vs := schStageVerdicts(pages, schGateSummary{})
@@ -124,13 +124,13 @@ func TestSchPlaceholderPageName(t *testing.T) {
 func TestSchStatusNext_PointsAtFirstUnfinishedStage(t *testing.T) {
 	// unknown 不阻断:S5/S6 判不了,不该把「下一步」永远钉死在那里。
 	done := []schPageFacts{{Name: "P1_POWER", DocUUID: "u1", Reachable: true, HasSheet: true,
-		NamedWell: true, Parts: 5, Wires: 12, Groups: 5, Frames: 1, Notes: 1}}
+		NamedWell: true, Parts: 5, Wires: 12, Groups: 5, Frames: 1}}
 	next, _ := schStatusNext(schStageVerdicts(done, schGateSummary{}), done)
 	if next != "easyeda pcb import-changes" {
 		t.Errorf("S1–S4 全绿时 next = %q, want the PCB handoff", next)
 	}
 	// 页名占位 → 指向改名,并带上真实 uuid(照抄即可执行)。
-	bad := []schPageFacts{{Name: "P1", DocUUID: "abc123", Reachable: true, HasSheet: true, Parts: 4, Wires: 8, Groups: 4, Frames: 1, Notes: 1}}
+	bad := []schPageFacts{{Name: "P1", DocUUID: "abc123", Reachable: true, HasSheet: true, Parts: 4, Wires: 8, Groups: 4, Frames: 1}}
 	next, _ = schStatusNext(schStageVerdicts(bad, schGateSummary{}), bad)
 	if !strings.Contains(next, "abc123") {
 		t.Errorf("next = %q, want a page-rename carrying the real uuid", next)

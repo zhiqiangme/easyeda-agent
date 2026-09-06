@@ -1,14 +1,8 @@
 package app
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"math"
-	"net/http"
-	"net/http/httptest"
-	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -254,105 +248,7 @@ func TestNoteFlush_NeverOverlapsToStayFlush(t *testing.T) {
 	})
 }
 
-// ── 负对照 B:显式 --x/--y 一字不改(贴底只管自动落点)────────────────────
-func TestNoteFlush_ExplicitCoordsAreVerbatim(t *testing.T) {
-	cfg, cleanup := newFakeNotePageDaemon(t)
-	defer cleanup()
-
-	content := noteContentOf(3)
-	// 故意给一个**离贴底行很远**的坐标,而且压在器件上:坐标必须原样返回,
-	// 只补一句警告。
-	x, y := 733.0, 611.0
-	warns, _, err := placeSchNote(cfg, "", "", "", &content, 10, false, &x, &y)
-	if err != nil {
-		t.Fatalf("显式坐标不该报错:%v", err)
-	}
-	if x != 733 || y != 611 {
-		t.Fatalf("显式坐标被改写成 (%g,%g)", x, y)
-	}
-	if len(warns) == 0 || !strings.Contains(strings.Join(warns, "\n"), "压住了已有图元") {
-		t.Errorf("压到图元必须明确警告(不静默):%v", warns)
-	}
-
-	// 不压任何东西的显式坐标同样一字不改,且不该被"贴底"顺手挪走。
-	x2, y2 := 60.0, 700.0
-	if _, _, err := placeSchNote(cfg, "", "", "", &content, 10, false, &x2, &y2); err != nil {
-		t.Fatalf("显式坐标不该报错:%v", err)
-	}
-	if x2 != 60 || y2 != 700 {
-		t.Fatalf("显式坐标被贴底覆盖成 (%g,%g)", x2, y2)
-	}
-}
-
-// newFakeNotePageDaemon:一页 = 图框 + 一个器件 + 一条已有说明。
-func newFakeNotePageDaemon(t *testing.T) (*appConfig, func()) {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" {
-			_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[]}`))
-			return
-		}
-		if r.URL.Path != "/action" {
-			http.NotFound(w, r)
-			return
-		}
-		var req struct {
-			Action string `json:"action"`
-		}
-		var buf bytes.Buffer
-		_, _ = buf.ReadFrom(r.Body)
-		_ = json.Unmarshal(buf.Bytes(), &req)
-		result := map[string]any{}
-		switch req.Action {
-		case "schematic.components.list":
-			result = map[string]any{"components": []any{
-				map[string]any{"componentType": "sheet", "primitiveId": "sheet1",
-					"bbox": map[string]any{"minX": 0.0, "minY": 0.0, "maxX": 1170.0, "maxY": 825.0}},
-				map[string]any{"componentType": "part", "designator": "U1", "primitiveId": "u1",
-					"bbox": map[string]any{"minX": 700.0, "minY": 600.0, "maxX": 800.0, "maxY": 700.0}},
-			}}
-		case "schematic.text.list":
-			result = map[string]any{"texts": []any{
-				map[string]any{"primitiveId": "t1", "x": 100.0, "y": 100.0, "content": "已有说明", "fontSize": 10.0},
-			}}
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result})
-	}))
-	hostPort := strings.TrimPrefix(srv.URL, "http://")
-	host, portStr, _ := strings.Cut(hostPort, ":")
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		t.Fatalf("parse port: %v", err)
-	}
-	return &appConfig{host: host, ports: fmt.Sprintf("%d-%d", port, port)}, srv.Close
-}
-
-// ── 负对照 C:比说明带还高的说明 —— 报文要说得出原因并给下一步 ─────────────
-func TestNoteFlush_TooTallReportsWhyAndWhatNext(t *testing.T) {
-	// 68 宽 / 42 高的窄带,配一条 30 全角 × 3 行的说明:哪一维都不够。
-	frame := layoutBBox{116, 434, 184, 614}
-	band := layoutBBox{116, 434, 184, 476}
-	msg := noteOutsideZoneMessage("POWER_IN", zoneMoveText{ID: "t2", X: 50, Y: 400,
-		Content:  strings.Repeat("宽", 30) + "\n" + strings.Repeat("宽", 30) + "\n" + strings.Repeat("宽", 30),
-		FontSize: 10}, partitionRect{BBox: frame, NoteBBox: band})
-	for _, want := range []string{"装不下", "说明带只有", "缩短文字", "--font-size", "group-move", "别再原样重跑"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("装不下的报文缺 %q:%s", want, msg)
-		}
-	}
-	if strings.Contains(msg, "--x ") {
-		t.Errorf("装不下时不许开一张自己都装不下的方子(不该给 --x/--y):%s", msg)
-	}
-}
-
-// ── 一把尺:带的定义 / note-outside-zone 的处方 / 落点求解三者同源 ──────────
-//
-// 真机取证(2026-08-20):某个框 (36,12)..(204,380) 的说明带是 (36,12)..(204,70),
-// 而 check 给出的修法坐标却是 `--x 50 --y 80` —— 80 > 带顶 70,处方自己就把说明
-// 放到了带外。处方与落点求解各写了一遍换算式,就是两把尺。
-var noteFixHintRe = regexp.MustCompile(`--x ([-+0-9.eE]+) --y ([-+0-9.eE]+)`)
-
-func TestRuler_NoteBandDefinitionSolverAndCheckAgree(t *testing.T) {
+func TestRuler_NoteBandDefinitionAndSolverAgree(t *testing.T) {
 	sheet := layoutBBox{MinX: 0, MinY: 0, MaxX: 1170, MaxY: 825}
 	opts := defaultPartitionOpts()
 	content := noteContentOf(3)
@@ -373,23 +269,14 @@ func TestRuler_NoteBandDefinitionSolverAndCheckAgree(t *testing.T) {
 		t.Fatalf("带里应当有贴底落点:band=%+v", p.NoteBBox)
 	}
 
-	// ③ check 的处方必须逐字等于②,而且处方落点必须在**带内**。
-	msg := noteOutsideZoneMessage("MCU", zoneMoveText{ID: "t1", X: 900, Y: 800, Content: content, FontSize: 10}, p)
-	m := noteFixHintRe.FindStringSubmatch(msg)
-	if m == nil {
-		t.Fatalf("带装得下时必须给出算好的落点坐标:%s", msg)
+	// The retained zone geometry must contain the solver's anchor exactly.
+	if p.NoteAnchor != [2]float64{sx, sy} {
+		t.Fatalf("planner anchor %v differs from solver (%g,%g)", p.NoteAnchor, sx, sy)
 	}
-	hx, _ := strconv.ParseFloat(m[1], 64)
-	hy, _ := strconv.ParseFloat(m[2], 64)
-	if hx != sx || hy != sy {
-		t.Fatalf("处方 (%g,%g) ≠ 求解器 (%g,%g) —— 两把尺", hx, hy, sx, sy)
+	if box := noteAnchorBBox(sx, sy, w, h); !bboxContains(p.NoteBBox, box) {
+		t.Fatalf("annotation falls outside reserved band: box=%+v band=%+v", box, p.NoteBBox)
 	}
-	if box := noteAnchorBBox(hx, hy, w, h); !bboxContains(p.NoteBBox, box) {
-		t.Fatalf("处方把说明放到了带外:box=%+v band=%+v", box, p.NoteBBox)
-	}
-	if hy-p.BBox.MinY != noteBottomInset {
-		t.Fatalf("处方没有贴底:离框底 %.4f,want %.0f", hy-p.BBox.MinY, noteBottomInset)
-	}
+
 }
 
 // 锚点语义的换算与它的逆必须闭环:改了 noteAnchorBBox 就必须改

@@ -257,12 +257,12 @@ func TestPartitionFindingFor(t *testing.T) {
 		parts, rects, labels, texts int
 		wantFrame, wantNote         bool
 	}{
-		{"什么都没有的 12 件页:框和说明都报", 12, 0, 0, 0, true, true},
-		{"画了框但一条说明都没有:只报说明", 12, 3, 3, 3, false, true},
+		{"什么都没有的 12 件页:仅缺框", 12, 0, 0, 0, true, false},
+		{"画了框但无说明:合格", 12, 3, 3, 3, false, false},
 		{"框 + 说明齐全:干净", 12, 3, 3, 6, false, false},
 		{"只有说明没有框:只报框", 12, 0, 0, 2, true, false},
 		{"低于阈值:一条都不报", schPartitionMinParts - 1, 0, 0, 0, false, false},
-		{"恰好到阈值:照报", schPartitionMinParts, 0, 0, 0, true, true},
+		{"恰好到阈值:照报", schPartitionMinParts, 0, 0, 0, true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

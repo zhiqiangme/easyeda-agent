@@ -502,7 +502,7 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 	}
 
 	// Layout-organization rule (铁律 #15): a multi-module page with no functional
-	// zone frames / circuit notes. Mechanical backstop — the rule was skipped twice
+	// zone frames. Mechanical backstop — the rule was skipped twice
 	// in one session when it lived only in docs. Scope to the single page under
 	// check (allPages inflates the part count while text.list is active-page only).
 	if !allPages {
@@ -513,9 +513,7 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 		if tf := titleBlockFinding(cfg, window, stderr); tf != nil {
 			geo = append(geo, *tf)
 		}
-		// 「放对没有」判据:登记说明必须在自己的分区框内(新 2)。单页作用域
-		// (text.list 只见激活页,登记与分区计划也按 docUUID 钉页)。
-		geo = append(geo, noteOutsideZoneFindings(cfg, window, stderr)...)
+
 	}
 
 	if len(geo) == 0 {
@@ -530,10 +528,8 @@ func mergeMarkerGeomFindingsWith(cfg *appConfig, window string, allPages bool, o
 			rep.Summary.TitleblockOverlaps++
 		case "marker-overlap":
 			rep.Summary.MarkerOverlaps++
-		case "note-outside-zone":
-			rep.Summary.NoteOutsideZones++
-		case "missing-partition", "missing-note", "missing-titleblock":
-			// 交付三件套(区框/说明/图签)共用一个聚合计数槽 —— 汇总行必须写成
+		case "missing-partition", "missing-titleblock":
+			// 交付件(区框/图签)共用一个聚合计数槽 —— 汇总行必须写成
 			// missing-deliverable 而不是 missing-partition:2026-08-17 真机上一条
 			// missing-titleblock 被汇总行标成「1 missing-partition」,引着人去查
 			// 明明画好的框。逐条明细(WARN 行)始终带真实类型,判读以明细为准。
@@ -655,16 +651,9 @@ func redundantNetMarkerFindings(comps []layoutComp, wires []schGroupWire) []chec
 // module and framing would be noise; our fixed ESP32-blink regression board has 12.
 const schPartitionMinParts = 6
 
-// partitionFinding flags a multi-part page that carries ZERO free text primitives
-// (zone titles + circuit notes). `sch zone-draw` always writes a title text next to
-// every frame it draws, and `sch note` writes the per-module descriptions, so
-// text.list==0 on a ≥schPartitionMinParts-part page means neither ran — the page was
-// left un-partitioned (exactly the lapse this backstops). Title-block fields are NOT
-// free text (they live on the sheet), so a bare, un-annotated page reads as 0.
-// Best-effort: a text.list failure returns nil (never masks the electrical findings).
-//
-// 「这页有几个框」的证据来自 sch_check_partition.go(画布优先、本地记账兜底)——
-// 只读记账的旧口径会对**画布上明明有框**的页恒报 missing-partition,根因见那里。
+// partitionFinding checks functional frames on a multi-part page. Canvas title
+// evidence and recorded frame IDs are reconciled by schPartitionPageEvidence.
+// A failed read remains a diagnostic warning and never masks electrical findings.
 func partitionFinding(cfg *appConfig, window string, comps []layoutComp, stderr io.Writer) []*checkFinding {
 	parts := 0
 	for _, c := range comps {
@@ -733,29 +722,7 @@ func titleBlockFinding(cfg *appConfig, window string, stderr io.Writer) *checkFi
 	}
 }
 
-// partitionFindingFor is the pure decision (split out for testing).
-//
-// **框和说明是两样东西,必须分开判**:第一版只看「自由文本数 > 0」就闭嘴 —— 于是
-// 画了区框(区名标签也是文本)或者随手写了一行注释,判据就认为交付要求满足了,
-// 而实际上说明可能一条没有、框可能一个没画。交付三件套(分页 / 区框 / 说明)里
-// 有两件在这条判据下是可以蒙混的。
-//
-// 现在:框看**我们自己的绘制记录**(平台不提供矩形枚举接口,只能由工具记账),
-// 说明看「自由文本减去区名标签」。两者各报各的。
-// schCircuitNoteCount 是「这一页有几条电路说明」的**唯一口径**:自由文本总数减去
-// 分区框的区名标签。
-//
-// 抽出来是因为它被算过两遍还算岔了(2026-08-16):`sch check` 用的是这个减法,
-// 而 `sch status` 读的是 frame 记账里的 Texts —— 那本身就是区名标签,于是真机上
-// 明明加了四条 note,status 照报「0 页有电路说明」。同一个概念只要有第二处实现,
-// 迟早会漂;靠注释提醒不管用,得让它物理上只有一份。
-func schCircuitNoteCount(freeTexts, zoneLabels int) int {
-	if n := freeTexts - zoneLabels; n > 0 {
-		return n
-	}
-	return 0
-}
-
+// partitionFindingFor checks module frames. Standalone circuit notes are not required.
 func partitionFindingFor(parts, frameRects, labelTexts, textCount int) []*checkFinding {
 	return partitionFindingForZones(parts, frameRects, labelTexts, textCount, 0)
 }
@@ -805,155 +772,7 @@ func partitionFindingForZones(parts, frameRects, labelTexts, textCount, zones in
 			Message: msg,
 		})
 	}
-	notes := schCircuitNoteCount(textCount, labelTexts)
-	switch {
-	case notes == 0:
-		out = append(out, &checkFinding{
-			Type:    "missing-note",
-			Level:   "warn",
-			Count:   parts,
-			Message: fmt.Sprintf("%d 个器件的页没有电路说明(区名标签不算)— 每模块 1~3 行 `sch note`:作用 + 关键参数 + 设计要点;交付前必须有", parts),
-		})
-	case zones > 0 && notes < zones:
-		// 同上:漏写一条与全都有,旧口径分不开。2026-08-26 实测 3 个模块只写成
-		// 2 条(第 3 条命令静默失败),check 照样绿。
-		out = append(out, &checkFinding{
-			Type:  "missing-note",
-			Level: "warn",
-			Count: zones - notes,
-			Message: fmt.Sprintf("%d 个功能模块只有 %d 条电路说明,还缺 %d 条(区名标签不算)— 每模块 1~3 行 "+
-				"`sch note --zone <模块名>`:作用 + 关键参数 + 设计要点。⚠ `sch note` 可能**静默失败**"+
-				"(落点装不下 / exec_js 抖动),写完用 `sch text-list` 回读复核,别只看退出码",
-				zones, notes, zones-notes),
-		})
-	}
 	return out
-}
-
-// ── note-outside-zone(登记说明不在自己分区框内)────────────────────────────
-//
-// 交付三件套的三条判据(missing-partition/note/titleblock)都是**存在性**判据:
-// 说明「有没有」,不判「放对没有」。REPORT-esp32mini-round2 新 2:P2 两条说明
-// 飘在框外,`sch check` 一句没提 —— 用户先于工具发现。本规则补上归属判据:
-// 每条 `--zone` 登记过的说明,其渲染 bbox 必须被该区分区框包含。
-//
-// 框的口径:zone-plan 的规划框 —— `sch zone-draw --mode partition` 画的就是这个
-// plan(平台无矩形枚举接口,画布实框只有我们的 id 记账、读不回几何),规划框与
-// 实框同源。登记信息与 `sch note --zone` 的注册同源(loadSchZoneModules 投影的
-// claim.NoteIDs),不另造一套。
-//
-// noteOutsideZoneFindings 是 I/O 外壳:读登记 → 有登记说明才算 plan + text.list。
-// best-effort:任何读取失败只写 stderr / 静默跳过,绝不掩盖电气判据。
-func noteOutsideZoneFindings(cfg *appConfig, window string, stderr io.Writer) []checkFinding {
-	_, _, docUUID, _, _, _, err := loadSchGroupsContext(cfg, window)
-	if err != nil {
-		return nil
-	}
-	zones, _, err := loadSchZoneModules(cfg, window, docUUID)
-	if err != nil || len(zones) == 0 {
-		return nil // 没有模块登记的页无从谈「说明归属」——正常,不是降级
-	}
-	registered := false
-	for _, zc := range zones {
-		if zc != nil && len(zc.NoteIDs) > 0 {
-			registered = true
-			break
-		}
-	}
-	if !registered {
-		return nil // 没登记过说明就没有判定对象(missing-note 管「没有」)
-	}
-	plan, _, err := computePartitionPlan(cfg, window, docUUID, defaultPartitionOpts())
-	if err != nil {
-		fmt.Fprintf(stderr, "sch check: note-outside-zone skipped — zone-plan failed: %v\n", err)
-		return nil
-	}
-	res, err := requestAutolayoutAction(cfg, "schematic.text.list", window, map[string]any{}, docUUID, "read notes for containment check")
-	if err != nil {
-		fmt.Fprintf(stderr, "sch check: note-outside-zone skipped — text.list failed: %v\n", err)
-		return nil
-	}
-	return noteOutsideZoneFindingsFor(plan.Partitions, zones, parseZoneMoveTexts(res.Result))
-}
-
-// noteOutsideZoneFindingsFor 是纯核(离线单测):逐区逐条登记说明判包含。
-// 不误伤的边界:未登记 zone 的自由文本从不判;区不在分区计划里(件不在本页/
-// 没有框)跳过;登记指向已删文本(stale)跳过 —— 与 fold 的口径一致。
-func noteOutsideZoneFindingsFor(parts []partitionRect, zones map[string]*schZoneClaim, texts []zoneMoveText) []checkFinding {
-	byID := map[string]zoneMoveText{}
-	for _, t := range texts {
-		byID[t.ID] = t
-	}
-	var names []string
-	for n := range zones {
-		names = append(names, n)
-	}
-	sort.Strings(names) // 确定性输出
-	var out []checkFinding
-	for _, name := range names {
-		zc := zones[name]
-		if zc == nil || len(zc.NoteIDs) == 0 {
-			continue
-		}
-		idx := notePartitionIndex(parts, name)
-		if idx < 0 {
-			continue // 区不在本页分区计划里:没有框可归属(missing-partition 另管)
-		}
-		part := parts[idx]
-		frame := &part.BBox
-		for _, nid := range zc.NoteIDs {
-			t, ok := byID[nid]
-			if !ok {
-				continue // stale 登记(说明已删)
-			}
-			nb := schNoteBBoxEstimate(t)
-			if bboxContains(*frame, nb) {
-				continue
-			}
-			b := nb
-			out = append(out, checkFinding{
-				Type:        "note-outside-zone",
-				Level:       "warn",
-				PrimitiveId: t.ID,
-				Count:       1,
-				At:          &checkPoint{X: t.X, Y: t.Y},
-				BBox:        &b,
-				Message:     noteOutsideZoneMessage(name, t, part),
-			})
-		}
-	}
-	return out
-}
-
-// noteOutsideZoneMessage 生成告警文案。**修法必须真的能执行** —— 旧文案一律说
-// 「prim-delete 后重跑 `sch note --zone X`」,而在两种真机情形下它必然死循环:
-// (a) 说明比带宽,重跑落到一模一样的框外坐标;(b) 框只有 68 宽(区里只有一个
-// 2 脚端子),任何可读说明都装不进,于是永远报警。现在 zone-plan 会为说明横向
-// 扩边 / 向下下探,所以第一档修法给的是**算好的落点坐标**;只有在可扩边界内确实
-// 装不下时才走第二档 —— 那一档就是设计正本第 8 条的 **blocked**,归因文本走
-// 唯一函数 noteBlockedDetail(是谁 / 每条边各卡在哪 / 出路是区内收敛还是拆页),
-// 与 `sch note` 落点侧的告警逐字同源。**说明带恒在框底,没有「翻到框顶」这档。**
-//
-// **处方不再自己算坐标,而是念求解器落进计划里的那一对(NoteAnchor/NoteFits)。**
-// 这是 2026-08-20 那条用户可见 bug 的另一半根因:处方旧实现按「带底 + 内缩」重算
-// 一遍落点,判定条件却**只有框/带包含** —— 不判占用、不判图签禁区,而落点求解
-// (scanNoteBand → noteSpotFree)三者全判。于是同一次交互里两把尺当面打架:
-// `sch note` 说「装不下,只能落框外」,`sch check` 对同一条说明、同一条带说
-// 「已为它留好位置 --x 275 --y 162.5」—— 而那个坐标压在图签上,求解器早已拒过。
-func noteOutsideZoneMessage(zone string, t zoneMoveText, p partitionRect) string {
-	frame, band := p.BBox, p.NoteBBox
-	head := fmt.Sprintf("区 %q 的说明 %s @(%.0f,%.0f) 在分区框 (%.0f,%.0f)..(%.0f,%.0f) 外",
-		zone, t.ID, t.X, t.Y, frame.MinX, frame.MinY, frame.MaxX, frame.MaxY)
-	w, h := noteSizeOf(t.Content, t.FontSize)
-	if p.NoteFits {
-		tx, ty := p.NoteAnchor[0], p.NoteAnchor[1]
-		return fmt.Sprintf("%s — 修法:`sch note --zone %s --text … --x %g --y %g`(说明带 (%.0f,%.0f)..(%.0f,%.0f) 已为它留好位置),"+
-			"或 `sch prim-delete --ids %s` 后重跑不带 --x/--y 的 `sch note --zone %s`;框几何变过就再跑一次 `sch zone-draw --mode partition`",
-			head, zone, tx, ty, band.MinX, band.MinY, band.MaxX, band.MaxY, t.ID, zone)
-	}
-	return fmt.Sprintf("%s — blocked:%s;收敛/拆页之后 `sch prim-delete --ids %s` 再重放这条说明。"+
-		"**别再原样重跑 `sch note`,那会落回同一个位置**",
-		head, noteBlockedDetail(zone, band, w, h), t.ID)
 }
 
 // schTextCount extracts the number of free text primitives from a

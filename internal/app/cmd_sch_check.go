@@ -76,9 +76,9 @@ type checkFinding struct {
 	PinDetails        []checkPinDetail `json:"pinDetails,omitempty"`
 	// Count 是规则专属槽:floating-pin=悬空脚数 / multi-net-wire=异名数 /
 	// polarity-convention-outlier=同页多数派票数(majorityCount)。
-	Count             int              `json:"count,omitempty"`
-	Message           string           `json:"message,omitempty"`
-	At                *checkPoint      `json:"at,omitempty"`
+	Count   int         `json:"count,omitempty"`
+	Message string      `json:"message,omitempty"`
+	At      *checkPoint `json:"at,omitempty"`
 	// Geometric marker rules (issues #146/#147/#148), computed Go-side from the
 	// components.list bboxes/anchors — the electrical check never sees them.
 	ComponentType    string            `json:"componentType,omitempty"`    // primary primitive's type
@@ -107,12 +107,10 @@ type checkSummary struct {
 	TitleblockOverlaps  int `json:"titleblockOverlaps"`
 	MarkerOverlaps      int `json:"markerOverlaps"`
 	// Layout-organization rule (铁律 #15): a multi-module page with zero functional
-	// zone frames / circuit notes. Mechanical backstop so "分区分区" is enforced by
+	// zone frames. Mechanical backstop so "分区分区" is enforced by
 	// the check, not by remembering the rule (which is unreliable — it was skipped
 	// twice in one session before this existed).
 	MissingPartitions int `json:"missingPartitions"`
-	// 「放对没有」判据(新 2):--zone 登记的说明,其渲染 bbox 不在该区分区框内。
-	NoteOutsideZones int `json:"noteOutsideZones"`
 	// Same-tree redundant markers (anchors differ so duplicate-net-marker misses).
 	RedundantNetMarkers int `json:"redundantNetMarkers"`
 	// Readability rule: netports standing vertical (rotation 90/270) render their
@@ -248,8 +246,8 @@ func checkLevelTag(level string) string {
 
 func renderCheckReport(rep checkReport, w io.Writer) {
 	s := rep.Summary
-	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d marker-overlap(s), %d missing-deliverable(partition/note/titleblock), %d note-outside-zone(s), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d polarity-convention outlier(s)\n",
-		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.MarkerOverlaps, s.MissingPartitions, s.NoteOutsideZones, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PolarityConventionOutliers)
+	fmt.Fprintf(w, "sch check: %d finding(s) — %d floating pin(s)/%d comp, %d geom-net mismatch(es), %d net-marker mismatch(es), %d multi-net wire(s), %d wire-crossing(s), %d wire-over-pin(s), %d zero-length wire(s), %d dangling wire(s), %d duplicate-net-marker(s), %d titleblock-overlap(s), %d marker-overlap(s), %d missing-deliverable(partition/titleblock), %d folded-net-label(s), %d redundant-net-marker(s), %d reversed-net-flag(s), %d polarity-convention outlier(s)\n",
+		s.Total, s.FloatingPins, s.ComponentsWithFloating, s.GeomNetMismatches, s.NetMarkerMismatches, s.MultiNetWires, s.WireCrossings, s.WireOverPins, s.ZeroLengthWires, s.DanglingWires, s.DuplicateNetMarkers, s.TitleblockOverlaps, s.MarkerOverlaps, s.MissingPartitions, s.FoldedNetLabels, s.RedundantNetMarkers, s.ReversedNetFlags, s.PolarityConventionOutliers)
 
 	for _, f := range rep.Findings {
 		tag := checkLevelTag(f.Level)
@@ -336,9 +334,7 @@ func renderCheckReport(rep checkReport, w io.Writer) {
 	for _, line := range missingDeliverableHints(rep.Findings) {
 		fmt.Fprintln(w, line)
 	}
-	if s.NoteOutsideZones > 0 {
-		fmt.Fprintln(w, "→ note-outside-zone: 登记的说明飘在自己分区框外 — 按明细 `sch prim-delete` 旧说明后重跑 `sch note --zone <区>`(自动落点落说明带,带高已按多行说明预留),再 `sch zone-draw --mode partition` 重画框")
-	}
+
 	if s.RedundantNetMarkers > 0 {
 		fmt.Fprintln(w, "→ redundant-net-marker: 同一线树上同网标志重复(修补残留)— 按 suggestDeleteIds `sch prim-delete` 清冗余(保留一个)")
 	}

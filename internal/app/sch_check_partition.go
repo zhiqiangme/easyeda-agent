@@ -1,57 +1,11 @@
 package app
 
-// sch_check_partition.go — `missing-partition` 的**证据来源**:画布优先,记账兜底。
-//
-// ── 恒报的根因(issue #181 复盘:「missing-partition 恒报 2,每轮 check 都亮」)──
-//
-// 上报者的归因是「虚拟组未持久化进 workflow」。**这条归因不成立** —— `block-apply`
-// 落块时确实把虚拟组写进了 workflow(cmd_sch_block_apply_run.go 的 saveSchGroups →
-// State.GroupsByPage),本机 `ceshi.json` 三页各有 4/2/6 个组为证。
-//
-// 真根因在**证据本身选错了**:`missing-partition` 判的从来不是「这页画没画框」,
-// 而是「**我们的本地记账里有没有这页的框 id**」(State.SchZoneFrameIdsByPage)。
-// 那份记账有三条与画布无关的丢失路径,任何一条都让一页画好的框对 check 隐形:
-//
-//	① 记账按**项目名**分文件(workflow/<project>.json),而 resolveStageProject
-//	   **优先用 `--project` 里用户敲的那个字符串**,拿不到才回落 friendlyName /
-//	   uuid。同一个工程用 `--project ceshi` 画框、之后不带 `--project`(解析成
-//	   friendlyName 或 uuid)跑 check,读的就是另一个文件 —— 本机 workflow 目录里
-//	   同时存在按名字的 `BBClaw-AI.json` 和按 uuid 的
-//	   `307b0022264f44c1beb4ba9355421ce9.json`,就是这条路径的化石。
-//	② 换机器 / 清 `~/.easyeda-agent` / 换用户:画布上的框还在,记账没了。
-//	③ 框由记账之外的路径落到画布(历史版本、手工、compensate 后的残留)。
-//
-// 三条都产生同一个形态:**画布上有框,check 说没有,而且怎么重跑都还是没有**——
-// 亮黄灯的恒报。恒亮又永不该管的判据比没有判据更糟:它训练人忽略整类告警。
-//
-// ── 修法:判定与生成用同一把尺 ────────────────────────────────────────────
-//
-// zone-draw 画一个区 = 一个矩形 + 一条标题文本,标题内容恒为
-// `strings.Join(p.Modules, " / ")`(cmd_sch_zone_plan.go:887 与
-// cmd_sch_zone_draw_resilient.go:56 两条画框路径逐字相同),而 `sch check` 本来
-// 就已经把整页 `schematic.text.list` 拉下来了(missing-note 要用)。于是**认框
-// 不需要任何新 I/O**:画布上出现一条内容正好是本页某个(或某几个)模块名的文本,
-// 就是「这一区画过框」的直接证据 —— 用的正是画框那一侧生成标题的同一个函数
-// (schZoneTitleContent),同一把尺,不是第二套启发式。
-//
-// 记账仍然读(recordedZoneFrames,与 zone-draw 自己的查找口径同一个函数),两个
-// 证人取**大**:记账在就按记账,记账丢了画布还能作证。
-//
-// ── 不许被这次容错顺手改瞎的两条 ──────────────────────────────────────────
-//
-//	(a) 真没画框的页**必须照报**:画布上没有区标题、记账也空 → 一个字不放宽。
-//	    「有虚拟组」本身**不算**分区完成 —— 铁律#15 要的是①分页②画框③说明,
-//	    SKILL 明写「手工 block-apply/sch place 不自动画框,必须补②③」。若让
-//	    「有组即免检」,block-apply 是主力落件路径,这条判据当场等于删掉。
-//	(b) 认出来的区标题要**同时**记进 labelTexts:missing-note 的口径是
-//	    「自由文本数 − 区名标签数」,只补框不补标签,标题就会被当成电路说明,
-//	    把 missing-note 静默关掉(判据不能一边松一边更松)。
+// Functional-frame evidence uses canvas titles and local frame records. Neither
+// grouped parts nor arbitrary free text exempts a page from requiring frames.
 
 import "strings"
 
-// missingDeliverableHints 按**真实出现的类型**给交付三件套的提示行(纯函数)。
-// 见 renderCheckReport 里的说明:三条共用一个聚合计数槽,提示行若按槽给,就会
-// 把 missing-titleblock 说成「没画分区框」。顺序固定:框 → 说明 → 图签。
+// missingDeliverableHints gives a remedy for the observed type, in frame/titleblock order.
 func missingDeliverableHints(findings []checkFinding) []string {
 	seen := map[string]bool{}
 	for _, f := range findings {
@@ -61,9 +15,6 @@ func missingDeliverableHints(findings []checkFinding) []string {
 	if seen["missing-partition"] {
 		out = append(out, "→ missing-partition: 多器件页没画功能分区框(铁律#15) — `sch zones set`→`sch zone-draw`(整纸版式 --mode partition);"+
 			"若 `sch zone-plan` 报 partitionOverlap,先 `sch zone-arrange --apply` 或拆页,再画")
-	}
-	if seen["missing-note"] {
-		out = append(out, "→ missing-note: 多器件页没有电路说明(区名标签不算,铁律#15) — 每模块 `sch note --zone <区>` 加 1~3 行:作用 + 关键参数 + 设计要点")
 	}
 	if seen["missing-titleblock"] {
 		// 文案与 titleBlockFinding 的明细逐字同源,免得提示行和明细行教两套写法。
@@ -160,7 +111,7 @@ func (e schPartitionEvidence) Frames() int {
 	return e.RecordedRects
 }
 
-// Labels 是「这页有几条区名标签」的最终口径(missing-note 拿它做减数)。
+// Labels is the reconciled count of module title texts.
 func (e schPartitionEvidence) Labels() int {
 	if e.DrawnTitles > e.RecordedLabels {
 		return e.DrawnTitles

@@ -742,7 +742,7 @@ func runSchZoneMove(cfg *appConfig, window, zoneRef string, dx, dy, textPad floa
 	for _, t := range notes {
 		v, terr := execAutolayoutZoneJS(pinned, win, docUUID, "move zone note", buildZoneMoveTextJS(t, dx, dy))
 		if terr != nil {
-			return fmt.Errorf("搬移文本 %s 失败(器件/导线已移动,文本半移 — 处理后可单独 `sch note` 补):%w", t.ID, terr)
+			return fmt.Errorf("搬移文本 %s 失败(器件/导线已移动,文本半移 — 请回读文本后在呈现数据中修复并重新 Apply):%w", t.ID, terr)
 		}
 		newID := asString(mnav(v, "textId"))
 		if newID == "" {
@@ -802,7 +802,7 @@ func newSchZoneMoveCommand(cfg *appConfig, window *string, stdout, stderr io.Wri
     按全区一次展开自动纳入 — 区内跨单元的直连线随区刚移,只有终止于区外件
     pin 的布线(SharedTrees)留在原地由旗对接;完整性预检照常生效 — 半移残骸
     suspects 直接拒绝;
-  - 区内 note 文本(sch note 放的说明):锚点落在区内容 bbox(外扩 --text-pad)内、
+  - 区内既有文本:锚点落在区内容 bbox(外扩 --text-pad)内、
     且不属于 zone-draw 框图元的文本,随区平移(平台无 text modify,delete+recreate,
     内容/字号/颜色/旋转保留;bold/italic 等富文本样式不保留);
   - zone-draw 的分区框不搬:move 后默认自动重画(--redraw-frame=false 跳过;

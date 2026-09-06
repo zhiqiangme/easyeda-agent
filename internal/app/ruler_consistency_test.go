@@ -53,20 +53,6 @@ func TestRuler_GateDefaultsShared(t *testing.T) {
 	}
 }
 
-func TestRuler_CircuitNoteCountSingleSource(t *testing.T) {
-	// 「电路说明有几条」只有 schCircuitNoteCount 一个口径,check 与 status 都调它。
-	// 这几条断言本身平淡,它们的价值在于:任何人想再写一遍这个减法时,会先看到这里。
-	if got := schCircuitNoteCount(5, 2); got != 3 {
-		t.Errorf("自由文本 5 − 区名标签 2 = %d, want 3", got)
-	}
-	if got := schCircuitNoteCount(2, 5); got != 0 {
-		t.Errorf("标签比文本多时该给 0(不是负数), got %d", got)
-	}
-	if got := schCircuitNoteCount(0, 0); got != 0 {
-		t.Errorf("空页该给 0, got %d", got)
-	}
-}
-
 func TestRuler_SettleReadBudgetSane(t *testing.T) {
 	// 回读稳定窗口:太短退化成"读两次同一个旧值",太长让每条写命令都变慢。
 	if settleDelay < 200*time.Millisecond || settleDelay > time.Second {

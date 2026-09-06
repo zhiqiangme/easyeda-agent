@@ -36,21 +36,12 @@ func TestPartitionFinding_PartialFramesAreReported(t *testing.T) {
 	}
 }
 
-func TestPartitionFinding_PartialNotesAreReported(t *testing.T) {
-	// 3 个模块、3 个框、只有 2 条说明(第 3 条写失败了)。
-	// textCount = 3 区名 + 2 说明 = 5;labelTexts = 3。
-	got := partitionFindingForZones(10, 3, 3, 5, 3)
-	var found *checkFinding
-	for _, f := range got {
-		if f.Type == "missing-note" {
-			found = f
+func TestPartitionFinding_NotesAreNotRequired(t *testing.T) {
+	// 只有模块框和标题即可;零条或部分旧说明都不能阻塞。
+	for _, textCount := range []int{3, 5} {
+		if got := partitionFindingForZones(10, 3, 3, textCount, 3); len(got) != 0 {
+			t.Fatalf("Notes 不再是交付要求,findings=%+v", got)
 		}
-	}
-	if found == nil {
-		t.Fatalf("3 个模块只有 2 条说明却不报,findings=%+v", got)
-	}
-	if !strings.Contains(found.Message, "2") || !strings.Contains(found.Message, "3") {
-		t.Fatalf("报文没写清 2 条 / 3 个模块:%s", found.Message)
 	}
 }
 
@@ -69,8 +60,8 @@ func TestPartitionFinding_CompleteDeliverablesStaySilent(t *testing.T) {
 // 没有模块记账(zones=0)时退回老口径:证不出「该有几个」就不能判「缺了几个」。
 func TestPartitionFinding_NoZoneAccountingKeepsOldBehaviour(t *testing.T) {
 	// 一个框都没有 → 照报(老口径)。
-	if got := partitionFindingForZones(10, 0, 0, 0, 0); len(got) != 2 {
-		t.Fatalf("zones=0 且啥都没有,应报 missing-partition + missing-note,实际:%+v", got)
+	if got := partitionFindingForZones(10, 0, 0, 0, 0); len(got) != 1 {
+		t.Fatalf("zones=0 且啥都没有,应只报 missing-partition,实际:%+v", got)
 	}
 	// 有框有说明 → 不报(证不出缺几个,不许瞎猜)。
 	if got := partitionFindingForZones(10, 1, 1, 3, 0); len(got) != 0 {

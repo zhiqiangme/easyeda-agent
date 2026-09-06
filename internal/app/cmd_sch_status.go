@@ -44,12 +44,8 @@ type schPageFacts struct {
 	Wires     int    `json:"wires"`
 	Groups    int    `json:"groups"`
 	Frames    int    `json:"frames"`
-	// Notes 是**电路说明**的条数,口径与 `sch check` 的 missing-note 规则一致:
-	// 页上自由文本总数减去分区框的区名标签。首版错读成 frame 记账里的 Texts
-	// (那是区名标签),于是真机上明明加了 4 条 note,status 照报「0 页有电路说明」
-	// —— 同一件事两个判据两把尺,又一次。
-	Notes int    `json:"notes"`
-	Err   string `json:"error,omitempty"`
+
+	Err string `json:"error,omitempty"`
 	// WiresErr 单独记:导线读失败与「真的没有导线」是两件事,合成 0 就会把
 	// 读取故障渲染成「还没连线」——本命令刚因为吞掉这个错误报过一次假缺陷。
 	WiresErr string `json:"wiresError,omitempty"`
@@ -119,7 +115,7 @@ type schGateSummary struct {
 //
 // gate 只在 --gate 真跑过时有意义;没跑就是 unknown —— 见铁律 1。
 func schStageVerdicts(pages []schPageFacts, gate schGateSummary) []schStageVerdict {
-	var reachable, sheeted, named, withGroups, withFrames, withNotes, placed, wired int
+	var reachable, sheeted, named, withGroups, withFrames, placed, wired int
 	var parts, wires int
 	var badNames []string
 	for _, p := range pages {
@@ -140,9 +136,6 @@ func schStageVerdicts(pages []schPageFacts, gate schGateSummary) []schStageVerdi
 		}
 		if p.Frames > 0 {
 			withFrames++
-		}
-		if p.Notes > 0 {
-			withNotes++
 		}
 		if p.Parts > 0 {
 			placed++
@@ -173,18 +166,18 @@ func schStageVerdicts(pages []schPageFacts, gate schGateSummary) []schStageVerdi
 	}
 	out = append(out, s1)
 
-	// S2 编组 / 分区(交付三件套的前两件:框 + 说明)
+	// S2 编组 / 分区:模块框与标题,不要求独立 Notes。
 	s2 := schStageVerdict{Stage: "S2", Title: "编组/分区"}
 	switch {
 	case withGroups == 0:
 		s2.State, s2.Detail = schStageTodo, "没有虚拟组 —— `sch block-apply` 落块自动归组,手工页 `sch group create`"
-	case withGroups < reachable || withFrames < withGroups || withNotes < withFrames:
+	case withGroups < reachable || withFrames < withGroups:
 		s2.State = schStagePartial
-		s2.Detail = fmt.Sprintf("%d/%d 页有组、%d 页有分区框、%d 页有电路说明(交付前三者都要有)",
-			withGroups, reachable, withFrames, withNotes)
+		s2.Detail = fmt.Sprintf("%d/%d 页有组、%d 页有分区框",
+			withGroups, reachable, withFrames)
 	default:
 		s2.State = schStageDone
-		s2.Detail = fmt.Sprintf("%d 页各有虚拟组 + 分区框 + 电路说明", withGroups)
+		s2.Detail = fmt.Sprintf("%d 页各有虚拟组 + 分区框", withGroups)
 	}
 	out = append(out, s2)
 
@@ -341,18 +334,11 @@ func schStatusNext(verdicts []schStageVerdict, pages []schPageFacts) (next, why 
 // 组/框来自按 documentUuid 索引的持久状态,与激活页无关。
 func collectSchPageFacts(cfg *appConfig, window, docUUID, name string, st *pcbStageState) schPageFacts {
 	f := schPageFacts{Name: name, DocUUID: docUUID, NamedWell: !schPlaceholderPageName(name)}
-	labels := 0
 	if st != nil {
 		f.Groups = len(st.GroupsForPage(docUUID))
 		if fr := st.SchZoneFrameIdsByPage[docUUID]; fr != nil {
-			f.Frames, labels = len(fr.Rects), len(fr.Texts)
+			f.Frames = len(fr.Rects)
 		}
-	}
-	// 电路说明 = 自由文本总数 − 区名标签(与 sch check 的 missing-note 同一把尺)。
-	// 口径与 `sch check` 的 missing-note **同一个函数**(schCircuitNoteCount),
-	// 不是"照着它再写一遍" —— 上一版正是各写各的,才会明明有四条说明却报 0。
-	if tres, terr := requestAction(cfg, "schematic.text.list", window, map[string]any{}); terr == nil {
-		f.Notes = schCircuitNoteCount(schTextCount(tres.Result), labels)
 	}
 	// includeWires 让导线跟几何**同一次调用、同一次页校验**回来。
 	//
@@ -521,15 +507,15 @@ func runSchStatus(cfg *appConfig, window string, allPages, withGate, asJSON bool
 	}
 	fmt.Fprintf(stdout, "sch status — 工程 %q · %s · **全部实测自活体,不落盘、不会过期**\n\n",
 		stageProjectLabel(project), scope)
-	fmt.Fprintf(stdout, "  %-18s %-6s %-6s %-6s %-6s %-6s %s\n", "页", "图纸", "页名", "组", "框/说明", "器件", "导线")
+	fmt.Fprintf(stdout, "  %-18s %-6s %-6s %-6s %-6s %-6s %s\n", "页", "图纸", "页名", "组", "框", "器件", "导线")
 	for _, p := range pages {
 		if !p.Reachable {
 			fmt.Fprintf(stdout, "  %-18s  读不到 —— %s\n", truncPageName(p.Name), p.Err)
 			continue
 		}
-		fmt.Fprintf(stdout, "  %-18s %-6s %-6s %-6d %d/%-6d %-6d %d\n",
+		fmt.Fprintf(stdout, "  %-18s %-6s %-6s %-6d %-6d %-6d %d\n",
 			truncPageName(p.Name), boolMark(p.HasSheet), boolMark(p.NamedWell),
-			p.Groups, p.Frames, p.Notes, p.Parts, p.Wires)
+			p.Groups, p.Frames, p.Parts, p.Wires)
 	}
 	fmt.Fprintln(stdout)
 	for _, v := range verdicts {

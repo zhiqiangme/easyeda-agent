@@ -1925,9 +1925,6 @@ the selection). Without --ids it exports the whole active page.`,
 	sch.AddCommand(newSchZoneDrawCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchZonePlanCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchZoneArrangeCmd(cfg, &window, stdout, stderr))
-	// 电路说明文本:分区框(zone-draw)只给模块命名,note 给模块配「作用+关键参数」
-	// 的一两行说明 —— 原理图布局默认约定的另一半。
-	sch.AddCommand(newSchNoteCmd(cfg, &window, stdout, stderr))
 	// 持久化编组(用户点名;#173 的 sch 侧):平台无编组 API(真机探测坐实),
 	// easyeda-agent 自己按 documentUuid 持久化组关系,group-move / align /
 	// distribute / autolayout 消费。
