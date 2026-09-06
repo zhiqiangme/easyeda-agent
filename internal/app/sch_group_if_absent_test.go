@@ -21,7 +21,7 @@ func TestGroupIfAbsentReusesOnlyCompleteEquivalentDeclaration(t *testing.T) {
 	g := groupIfAbsentFixture()
 	groups := []*schGroup{g}
 	before, _ := json.Marshal(groups)
-	next, got, unchanged, err := groupsCreateWithProvenance(groups, " power ", []string{"u1", "c2", "c1", "c1"}, "block.power", "U1", map[string]string{"OUT": "C2", "CORE": "U1"}, true)
+	next, got, unchanged, err := groupsCreateWithProvenance(groups, " power ", []string{"U1", "C2", "C1", "C1"}, "block.power", "U1", map[string]string{"OUT": "C2", "CORE": "U1"}, true)
 	if err != nil || !unchanged || got != g || len(next) != 1 {
 		t.Fatalf("reordered complete member set/provenance should reuse the group: %+v %t %v", got, unchanged, err)
 	}
@@ -132,7 +132,7 @@ func TestGroupCreateIfAbsentCLILeavesPersistedStateUntouchedOnRepeat(t *testing.
 		t.Fatal(err)
 	}
 	statBefore, _ := os.Stat(file)
-	if out, err := run("c1,u1,c2"); err != nil || !strings.Contains(out, "unchanged group") {
+	if out, err := run("C1,U1,C2"); err != nil || !strings.Contains(out, "unchanged group") {
 		t.Fatalf("repeated CLI declaration did not no-op: %s %v", out, err)
 	}
 	after, _ := os.ReadFile(file)
@@ -148,7 +148,7 @@ func TestGroupCreateIfAbsentCLILeavesPersistedStateUntouchedOnRepeat(t *testing.
 		t.Fatal("conflicting CLI declaration changed persistent state")
 	}
 	st, err := loadPcbStageState(project)
-	if err != nil || len(st.GroupsForPage(doc)) != 1 || !reflect.DeepEqual(st.GroupsForPage(doc)[0].Members, []string{"C1", "C2", "U1"}) {
+	if err != nil || len(st.GroupsForPage(doc)) != 1 || !reflect.DeepEqual(st.GroupsForPage(doc)[0].Members, []string{"U1", "C2", "C1"}) {
 		t.Fatalf("final registry is not the complete Lib: %+v %v", st, err)
 	}
 	for _, c := range daemon.snapshot() {

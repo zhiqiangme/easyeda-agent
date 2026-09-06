@@ -32,7 +32,7 @@ func TestNextGroupID(t *testing.T) {
 }
 
 func TestGroupsCreate(t *testing.T) {
-	// fresh create: id allocated, members normalized (upper-case, sorted, deduped)
+	// fresh create: id allocated, member spelling/order retained, duplicates removed
 	out, g, err := groupsCreate(nil, "mcu-core", []string{"r1", "C5", "U2", "r1"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -40,7 +40,7 @@ func TestGroupsCreate(t *testing.T) {
 	if g.ID != "g1" || g.Name != "mcu-core" {
 		t.Fatalf("got id=%q name=%q", g.ID, g.Name)
 	}
-	if strings.Join(g.Members, ",") != "C5,R1,U2" {
+	if strings.Join(g.Members, ",") != "r1,C5,U2" {
 		t.Fatalf("members = %v", g.Members)
 	}
 	if len(out) != 1 {
@@ -49,7 +49,7 @@ func TestGroupsCreate(t *testing.T) {
 
 	// duplicate member across groups is refused and names the owning group
 	_, _, err = groupsCreate(out, "", []string{"C9", "c5"})
-	if err == nil || !strings.Contains(err.Error(), "g1") || !strings.Contains(err.Error(), "C5") {
+	if err == nil || !strings.Contains(err.Error(), "g1") || !strings.Contains(strings.ToLower(err.Error()), "c5") {
 		t.Fatalf("dup-member error should name g1 and C5, got: %v", err)
 	}
 
@@ -68,12 +68,12 @@ func TestGroupsCreate(t *testing.T) {
 func TestGroupsAddMembers(t *testing.T) {
 	groups := []*schGroup{mkGroup("g1", "", "C5", "R1"), mkGroup("g2", "", "U9")}
 
-	// normal add merges + sorts
+	// normal add appends the declared reference without rewriting existing ones
 	_, g, err := groupsAddMembers(groups, "g1", []string{"c6"})
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if strings.Join(g.Members, ",") != "C5,C6,R1" {
+	if strings.Join(g.Members, ",") != "C5,R1,c6" {
 		t.Fatalf("members = %v", g.Members)
 	}
 
@@ -624,7 +624,7 @@ func TestParseGroupRolesFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if roles["BUCK"] != "U3" || roles["CIN"] != "C11" || len(roles) != 2 {
+	if roles["BUCK"] != "u3" || roles["CIN"] != "C11" || len(roles) != 2 {
 		t.Fatalf("roles misparsed: %v", roles)
 	}
 	if r, err := parseGroupRolesFlag(""); err != nil || r != nil {

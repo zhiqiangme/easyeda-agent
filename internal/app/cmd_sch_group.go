@@ -103,7 +103,7 @@ func groupOfMember(groups []*schGroup, designator string) *schGroup {
 			continue
 		}
 		for _, m := range g.Members {
-			if m == u {
+			if strings.EqualFold(m, u) {
 				return g
 			}
 		}
@@ -122,7 +122,7 @@ func describeSchGroup(g *schGroup) string {
 // groupsCreate adds a new group. Every member must be group-free (a designator
 // belongs to at most one group per page); violations name the owning group.
 func groupsCreate(groups []*schGroup, name string, members []string) ([]*schGroup, *schGroup, error) {
-	norm := normalizeDesignators(members)
+	norm := schGroupDesignators(members)
 	if len(norm) == 0 {
 		return nil, nil, fmt.Errorf("--members is required (CSV of designators, e.g. R1,C5,U2)")
 	}
@@ -144,7 +144,7 @@ func groupsCreate(groups []*schGroup, name string, members []string) ([]*schGrou
 // match; a subset must never silently inherit a larger group's membership.
 func groupsCreateWithProvenance(groups []*schGroup, name string, members []string, blockID, instance string, roles map[string]string, ifAbsent bool) ([]*schGroup, *schGroup, bool, error) {
 	name, blockID, instance = strings.TrimSpace(name), strings.TrimSpace(blockID), strings.TrimSpace(instance)
-	norm := normalizeDesignators(members)
+	norm := schGroupDesignators(members)
 	if len(norm) == 0 {
 		return nil, nil, false, fmt.Errorf("--members is required (CSV of designators)")
 	}
@@ -170,14 +170,14 @@ func groupsCreateWithProvenance(groups []*schGroup, name string, members []strin
 			}
 		}
 		if existing != nil {
-			if !slices.Equal(normalizeDesignators(existing.Members), norm) || existing.BlockID != blockID || existing.Instance != instance || !maps.Equal(existing.Roles, roles) {
+			if !schGroupSameDesignators(existing.Members, norm) || existing.BlockID != blockID || existing.Instance != instance || !maps.Equal(existing.Roles, roles) {
 				return nil, nil, false, fmt.Errorf("group %s conflicts with --if-absent: complete members, block-id, instance and roles must match", describeSchGroup(existing))
 			}
 			for _, g := range groups {
 				if g == nil || g == existing {
 					continue
 				}
-				for _, ref := range normalizeDesignators(g.Members) {
+				for _, ref := range schGroupDesignators(g.Members) {
 					if slices.Contains(norm, ref) {
 						return nil, nil, false, fmt.Errorf("%s also belongs to group %s; cannot reuse conflicting group membership", ref, describeSchGroup(g))
 					}
@@ -201,7 +201,7 @@ func groupsAddMembers(groups []*schGroup, ref string, members []string) ([]*schG
 	if err != nil {
 		return nil, nil, err
 	}
-	norm := normalizeDesignators(members)
+	norm := schGroupDesignators(members)
 	if len(norm) == 0 {
 		return nil, nil, fmt.Errorf("--members is required (CSV of designators)")
 	}
@@ -215,7 +215,7 @@ func groupsAddMembers(groups []*schGroup, ref string, members []string) ([]*schG
 			merged = append(merged, m)
 		}
 	}
-	g.Members = normalizeDesignators(merged)
+	g.Members = schGroupDesignators(merged)
 	return groups, g, nil
 }
 
@@ -226,7 +226,7 @@ func groupsRemoveMembers(groups []*schGroup, ref string, members []string) (out 
 	if err != nil {
 		return nil, nil, false, err
 	}
-	norm := normalizeDesignators(members)
+	norm := schGroupDesignators(members)
 	if len(norm) == 0 {
 		return nil, nil, false, fmt.Errorf("--members is required (CSV of designators)")
 	}
@@ -234,8 +234,9 @@ func groupsRemoveMembers(groups []*schGroup, ref string, members []string) (out 
 	for _, m := range norm {
 		found := false
 		for _, cur := range g.Members {
-			if cur == m {
+			if strings.EqualFold(cur, m) {
 				found = true
+				m = cur // preserve the actual stored designator when removing an alias
 				break
 			}
 		}
@@ -279,7 +280,7 @@ func groupsUngroup(groups []*schGroup, ref string) ([]*schGroup, *schGroup, erro
 
 // parseGroupRolesFlag parses --roles "ROLE=R1,LED=LED1" into role→designator.
 // Role keys keep their case as typed (block JSON role names are the match key);
-// designators are upper-cased like every other member reference. Duplicate
+// designators retain the declared spelling. Duplicate
 // roles and malformed entries are hard errors — a silently-wrong provenance
 // map would make reconcile report phantom diffs.
 func parseGroupRolesFlag(raw string) (map[string]string, error) {
@@ -301,7 +302,7 @@ func parseGroupRolesFlag(raw string) (map[string]string, error) {
 		if _, dup := out[role]; dup {
 			return nil, fmt.Errorf("--roles 里 role %q 出现了两次", role)
 		}
-		out[role] = strings.ToUpper(strings.TrimSpace(kv[1]))
+		out[role] = strings.TrimSpace(kv[1])
 	}
 	if len(out) == 0 {
 		return nil, nil
@@ -324,7 +325,7 @@ func findPartialGroups(groups []*schGroup, selected []string) []*schGroup {
 		}
 		in, missing := 0, 0
 		for _, m := range g.Members {
-			if sel[m] {
+			if sel[strings.ToUpper(m)] {
 				in++
 			} else {
 				missing++
@@ -827,7 +828,7 @@ func expandSchGroupForMove(cfg *appConfig, window, groupRef string) (*schGroupMo
 
 	member := map[string]bool{}
 	for _, m := range g.Members {
-		member[m] = true
+		member[strings.ToUpper(m)] = true
 	}
 	in := groupExpandInput{}
 	set := &schGroupMoveSet{Group: g}
@@ -853,7 +854,7 @@ func expandSchGroupForMove(cfg *appConfig, window, groupRef string) (*schGroupMo
 	}
 	var missing []string
 	for _, m := range g.Members {
-		if !found[m] {
+		if !found[strings.ToUpper(m)] {
 			missing = append(missing, m)
 		}
 	}
@@ -1064,7 +1065,7 @@ func cascadeGroupsRemoveDesignators(groups []*schGroup, drop map[string]bool) (n
 		}
 		var kept, removed []string
 		for _, m := range g.Members {
-			if drop[m] {
+			if drop[m] || drop[strings.ToUpper(m)] {
 				removed = append(removed, m)
 			} else {
 				kept = append(kept, m)
@@ -1081,7 +1082,7 @@ func cascadeGroupsRemoveDesignators(groups []*schGroup, drop map[string]bool) (n
 		g.Members = kept
 		// Roles 指向已删位号的条目一并摘除,免得 reconcile 拿死位号去对账。
 		for r, d := range g.Roles {
-			if drop[d] {
+			if drop[d] || drop[strings.ToUpper(d)] {
 				delete(g.Roles, r)
 			}
 		}
@@ -1268,7 +1269,7 @@ an error; an exact match leaves the registry and its timestamps unchanged.`,
 							}
 							go_ := groupOut{ID: g.ID, Name: g.Name, At: g.At}
 							for _, m := range g.Members {
-								go_.Members = append(go_.Members, memberOut{Designator: m, Stale: presenceKnown && !present[m]})
+								go_.Members = append(go_.Members, memberOut{Designator: m, Stale: presenceKnown && !present[strings.ToUpper(m)]})
 							}
 							pagesOut[uuid] = append(pagesOut[uuid], go_)
 						}

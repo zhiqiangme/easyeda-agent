@@ -319,15 +319,15 @@ func (s *State) ReplaceSchZonesByPage(z map[string]map[string]*SchZoneClaim) {
 	})
 }
 
-// Group is one persistent virtual group. Members are DESIGNATORS (upper-case,
-// sorted), not primitiveIds: a designator is the netlist key and stays stable
+// Group is one persistent virtual group. Members are authored DESIGNATORS with
+// their spelling/order preserved, not primitiveIds: the netlist key stays stable
 // within a document, while primitiveIds churn on wire rebuilds / re-place /
 // window reloads. Consumers (group-move --group) resolve designator → current
 // primitiveId at call time. A designator belongs to at most ONE group per page.
 type Group struct {
 	ID      string   `json:"id"`             // auto-assigned: g1, g2, …
 	Name    string   `json:"name,omitempty"` // optional human-readable label
-	Members []string `json:"members"`        // designators, upper-case, sorted
+	Members []string `json:"members"`        // authored designators, spelling and declaration order preserved
 	At      string   `json:"at,omitempty"`
 	// Annotations are the primitiveIds of this group's drawn frame + labels.
 	// 平台**不提供矩形/文本的枚举接口**(只能创建,不能列出),所以它们的身份只能

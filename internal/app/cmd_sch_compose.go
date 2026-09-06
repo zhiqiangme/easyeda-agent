@@ -595,7 +595,6 @@ func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool) 
 		for _, id := range append(append([]string(nil), m.CoreComponents...), m.PeripheralComponents...) {
 			members = append(members, refs[id])
 		}
-		sort.Strings(members)
 		pb.Steps = append(pb.Steps, playbookStep{ID: fmt.Sprintf("register-lib-%03d", i), Run: "sch group create", Flags: map[string]any{"name": m.ID, "members": strings.Join(members, ","), "if-absent": true}})
 	}
 	frames, err := powerLayoutFrameSteps(&p.Layout)
