@@ -25,15 +25,15 @@ AI 从空白页开始生成原理图——不是生成一张电路图图片,而�
 
 ![ESP32-S3 成品板:4 层电源平面 + 圆角板框 + 位号对齐](images/demo-esp32-board.png)
 
-## 1.4.2 候选设计
+## 1.4.2 数据驱动原理图
 
 - **数据 → Lib compose → SCH Apply**:在 canonical 数据中维护器件、引脚、网络与 NC,先设计 Lib 局部几何,再离线组合单页,通过顺序队列调用官方 API 并回读验证。
 - **身份与显示分开**:稳定器件 ID 用于数据绑定,合法数字位号保持原样,功能名称存 Role。
 - **紧凑布局与方框**:从左上向右按 Z 字排列、各行等高;粉色虚线框配 0.2 inch 标题,优先利用电路上方或下方空档,不另生成 Notes。
 
-这是开发候选,不表示已经发布或整板验收通过。组合器使用已设计的模块几何,
+版本与资产以 GitHub Release 为准。组合器使用已设计的模块几何,
 不自动推导任意外围电路、分页或删除源页。构建步骤、已完成验证和未完成项见
-[1.4 发布准备](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/release-1.4.md)。
+[1.4 发布与验证](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/release-1.4.md)。
 
 ## 已支持能力概览
 

@@ -11,6 +11,8 @@
 
 ### Fixed
 
+- Match schematic footprint names case-insensitively, prefer available footprint identity, and isolate resolution caches by that identity (#197).
+- Count only enabled PCB copper layers, honor an explicit stackup specification, and prevent routing or power-plane operations from silently changing a board's layer count (#198). Missing layer evidence stops the operation; preview and execution use the same stackup preflight.
 - Load every existing page before the global designator guard, including pages not yet visited in the current editor session. Reject incomplete all-page inventories or a failed return to the original page.
 - Improve stale connector/window cleanup, reconnect session handling and connection diagnostics; document that updating an extension does not replace the runtime already loaded by an open editor.
 - Make Skill references and helpers work outside a repository checkout, consolidate the current data-to-Apply workflow, remove obsolete layout instructions and repeated historical notes, and correct Bash installer examples.

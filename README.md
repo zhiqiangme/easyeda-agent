@@ -16,9 +16,9 @@
 
 ![easyeda-agent workflow](docs/assets/easyeda-agent-workflow.svg)
 
-> **当前开发候选:v1.4.2。** 原理图以器件、引脚与连接图为依据,先在本地数据中设计
+> **1.4.2 版本。** 原理图以器件、引脚与连接图为依据,先在本地数据中设计
 > Lib 电路与几何,再通过 `sch compose` 组合单页、`sch apply` 顺序执行并回读验证。
-> 发布状态、构建步骤与尚未完成的验收见 [1.4 发布准备](docs/release-1.4.md)。
+> 发布状态、构建步骤与尚未完成的验收见 [1.4 发布与验证](docs/release-1.4.md)。
 
 `easyeda-agent` 把官方 EasyEDA 扩展 API 变成一套**有类型、可观测、Skill 友好**的系统。EasyEDA 插件保持极薄——它连到本地 agent、只执行被批准的动作;Go CLI/daemon 掌管协议、状态、产物、校验和面向用户的工作流。
 
@@ -233,7 +233,7 @@ P3 USB 页:CH340 USB 串口、USB-C 接口、自动下载等四个功能分区�
 
 ## 能力清单(已支持)
 
-以 typed CLI 子命令暴露(`easyeda <domain> <verb>`)。当前候选的验证范围与未完成项见 [1.4 发布准备](docs/release-1.4.md)。
+以 typed CLI 子命令暴露(`easyeda <domain> <verb>`)。1.4.2 的验证范围与未完成项见 [1.4 发布与验证](docs/release-1.4.md)。
 
 **原理图** — 完整功能地图(已支持 40+ 子命令按功能域 + 待支持路线)见 **[docs/cli/schematic.md](docs/cli/schematic.md)**(CLI 功能索引:[docs/cli/](docs/cli/README.md));摘要:
 - **器件与库**:从立创/LCSC 库按 uuid 放**真实器件**、换型号(`replace`)、符号/封装重绑、C 号确定性解析(`resolve-lcsc`);`modify` 属性 **merge 语义**(只 patch 顶层字段不再清空自定义属性,#175)。

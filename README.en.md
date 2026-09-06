@@ -16,10 +16,10 @@
 
 ![easyeda-agent workflow](docs/assets/easyeda-agent-workflow.svg)
 
-> **Current development candidate: v1.4.2.** Schematic work starts from component,
+> **Version 1.4.2.** Schematic work starts from component,
 > pin, and connectivity data: design each Lib circuit and its geometry locally,
 > compose one sheet with `sch compose`, then execute and verify with `sch apply`.
-> See [1.4 release preparation](docs/release-1.4.md) for release status and validation limits.
+> See [1.4 release and validation](docs/release-1.4.md) for release status and validation limits.
 
 `easyeda-agent` turns the official EasyEDA extension API into a typed, observable, Skill-friendly system. The EasyEDA plugin stays thin: it connects to the local agent and executes approved actions. The Go CLI/daemon owns protocol, state, artifacts, validation, and user-facing workflows.
 
@@ -246,7 +246,7 @@ Both sides of the action protocol are in place and working. The Go daemon owns t
 
 ## Capabilities
 
-Capabilities are exposed through CLI subcommands (`easyeda <domain> <verb>`). Validation completed for the current candidate, and the remaining checks, are listed in [1.4 release preparation](docs/release-1.4.md).
+Capabilities are exposed through CLI subcommands (`easyeda <domain> <verb>`). Validation completed for the version 1.4.2, and the remaining checks, are listed in [1.4 release and validation](docs/release-1.4.md).
 
 **Schematic**
 - Place real library/LCSC parts by uuid, then wire them (`sch` place/wire); power/ground **net-flags** via `connect_pin` (auto-compensates the rotation-store quirk).
