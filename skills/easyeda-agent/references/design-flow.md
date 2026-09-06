@@ -142,7 +142,8 @@ PCB 沿用实际阶段门，详细参数以当前 `--help` 为准。布局、板
 - 布线前核对真实叠层、网络类别、差分/等长预算和禁布区。线宽、过孔、间距以项目
   实时 DRC 规则和 [fab-rules-jlcpcb.json](./fab-rules-jlcpcb.json) 工艺下限为依据；
   数据手册的电流、阻抗、回流与散热要求不能由工具默认值替代。
-- `pcb route-critical --dry-run` 先检查关键网识别和方案；执行后确认电源铜、差分线
+- `pcb route-critical --spec <S0.json> --dry-run` 先核对真实铜层与需求，再检查关键网方案；
+  层数无证据或与 `stackup.layers` 不符时拒绝执行，不默认两层。执行后确认电源铜、差分线
   长度与锁定状态。差分预算以本板接口规范为准，不把某个样例的 skew 数字推广到所有网。
 - 稀疏短连线可用 `pcb route-short`；它默认跳过电源/GND。稠密板采用用户选定的原生
   自动布线或已配置外部路由器。`pcb autoroute` 需要外部 engine，无配置时只导出 DSN；
@@ -152,6 +153,8 @@ PCB 沿用实际阶段门，详细参数以当前 `--help` 为准。布局、板
 - 电源走线宽度按网络电流与规则计算；铜面选择按层数和网络隔离确定。两层可用
   `pcb power-pour`；四层 `pcb power-planes` 默认 GND 在层 15（内电层）、电源在层 16。
   多电源轨不要短接在同一平面；局部铜和零散轨单独处理。
+  `power-planes` 保持已有四层及以上叠层；两层升级须有已确认需求并显式传
+  `--allow-stackup-change`，未知层数始终拒绝。dry-run 同样预检并列明是否计划升级。
 - `power-planes` 已封装 SIGNAL 上建网络铜 → 转 GND PLANE → rebuild 的顺序。
   铜面或 via 修改后检查 anti-pad、热连接、EP 接地与散热要求，不能因命令成功就判连通。
 - PCB 写后按 `STALE_READ` 提示用 `doc reload` 刷新；铜形变化后 `pcb pour-rebuild`。

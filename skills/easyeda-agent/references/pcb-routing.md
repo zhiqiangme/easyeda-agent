@@ -5,6 +5,22 @@
 
 ---
 
+### 关键网与叠层
+
+`pcb route-critical --spec <S0.json> --dry-run` 先检查真实铜层数与关键网方案。
+执行时沿用同一份 spec；`stackup.layers` 与活板不一致，或读不到可靠铜层证据，
+命令会在布线前拒绝。先用 `pcb layers` 检查；遇 `STALE_READ` 按提示 reload 后重读。
+不把未启用的内层、图层总数或默认两层当成真实叠层。
+
+- 两层板的电源步走 `pcb power-pour`；四层及以上走 `pcb power-planes`。
+  `route-critical --allow-stackup-change` 不会把正常两层板改走内电层。
+- 独立 `power-planes` 要求至少四层；已有六层等叠层保持原层数。
+  只有用户已明确授权将已确认的两层板升级为四层，才使用
+  `pcb power-planes --allow-stackup-change`。未知层数不能被此开关绕过。
+- `power-planes --dry-run` 运行相同叠层预检；允许升级时，结果中的 `stackup`
+  明确列出当前层数、目标层数、证据来源和是否需要修改，不写入板子。
+  需要改变已确定的设计叠层时，应先单独确认需求并更新 S0，不能为方便布线擅改。
+
 ### Routing (copper tracks + vias)
 
 Real routing primitives — **additive creates** (no confirm), like the schematic

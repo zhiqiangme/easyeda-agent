@@ -3422,7 +3422,8 @@ current stackup with 'pcb layers' (copperLayerCount + each layer's type).`,
 2-layer pour conflict (two power nets can't both connect on one shared layer, which
 stranded 5 of ceshi's 3V3 pads). This:
 
-  1. ensures the board has >=4 copper layers,
+  1. verifies the existing board has >=4 copper layers; a confirmed 2-layer board
+     requires --allow-stackup-change to plan or perform an upgrade to 4 layers,
   2. assigns GND to an inner layer and power nets (VCC/3V3/… via isGlobalNet) to another,
   3. via-stitches every power/ground pad DOWN to its plane (the connection point the
      inner pour needs — without it the inner pour is all isolated islands),
@@ -3437,7 +3438,9 @@ plain signal-layer pour.
 
 Validated on ceshi: DRC 31 → 0, No-Connection → 0. Run AFTER auto-place + outline-fit
 + route-short (signals). Two power nets sharing one plane layer re-create the conflict
-(warned) — give each its own inner layer on a 6+ layer board. --dry-run prints the plan.`,
+(warned) — give each its own inner layer on a 6+ layer board. Existing 4+ layer counts
+are preserved. --dry-run runs the same stackup preflight and prints the intended
+current/target layer counts without mutation. Missing layer evidence always refuses.`,
 			Args: cobra.NoArgs,
 			Example: `  easyeda pcb power-planes
   easyeda pcb power-planes --gnd-layer 15 --power-layer 16
@@ -3454,7 +3457,7 @@ Validated on ceshi: DRC 31 → 0, No-Connection → 0. Run AFTER auto-place + ou
 		c.Flags().BoolVar(&allowStackupChange, "allow-stackup-change", false,
 			"permit step 1 to CHANGE the board's copper layer count (pcb stackup set --layers 4). "+
 				"Off by default: a board with <4 copper layers is REFUSED, not silently re-stacked "+
-				"(T-11). On a 2-layer board use `pcb power-pour` instead")
+				"Unknown layer counts always refuse. On a 2-layer board use `pcb power-pour` instead")
 		pcb.AddCommand(c)
 	}
 
@@ -3471,7 +3474,7 @@ Validated on ceshi: DRC 31 → 0, No-Connection → 0. Run AFTER auto-place + ou
 			Use:   "power-pour",
 			Short: "2-layer power distribution: pour GND + each rail's local copper (电源走铺铜块, not thin tracks)",
 			Long: `Deliver power through copper POUR on a 2-layer board — the 2-layer analog of
-'power-planes' (which forces 4 layers). Thin power tracks are the #1 DRC source
+'power-planes' (which requires at least 4 layers). Thin power tracks are the #1 DRC source
 (design-decisions.md: six thin 3V3 tracks = 18/27 Safe-Spacing violations); this
 pours them instead:
 

@@ -43,6 +43,22 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 	if dryRun {
 		defer setDispatchDryRun(true)()
 	}
+	// Both planning and execution must start from the same reliable stackup.
+	liveLayers, layerSource, err := copperLayerCount(cfg, window)
+	if err != nil {
+		return fmt.Errorf("power-planes stackup preflight: %w", err)
+	}
+	targetLayers := liveLayers
+	if liveLayers < 4 {
+		if !allowStackupChange {
+			return fmt.Errorf("power-planes needs >=4 copper layers but the board has %d — refusing to re-stack it; use `easyeda pcb power-pour` for a 2-layer board. If the design explicitly requires an upgrade, use `easyeda pcb power-planes --allow-stackup-change` or `easyeda pcb stackup set --layers 4`", liveLayers)
+		}
+		targetLayers = 4
+	}
+	stackupPlan := map[string]any{
+		"currentCopperLayers": liveLayers, "targetCopperLayers": targetLayers,
+		"changeRequired": targetLayers != liveLayers, "source": layerSource,
+	}
 	// 1. Read the board: pads (grouped by power net), routed tracks, existing vias,
 	//    and the live spacing rule — the stitch planner scores against all of them.
 	pads, err := fetchPcbPads(cfg, window)
@@ -117,40 +133,23 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 	if dryRun {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(map[string]any{"dryRun": true, "plan": plan, "routeAsTracks": routeAsTracks, "warnings": warnings, "pourRect": rect, "gndAsPlane": gndAsPlane, "gndLayer": gndLayer})
+		return enc.Encode(map[string]any{"dryRun": true, "plan": plan, "routeAsTracks": routeAsTracks, "warnings": warnings, "pourRect": rect, "gndAsPlane": gndAsPlane, "gndLayer": gndLayer, "stackup": stackupPlan})
 	}
 
-	// 3. Ensure >=4 copper layers — but NEVER silently. Re-stacking a board is
-	//    irreversible in fab terms (a 2-layer board that is already ordered comes
-	//    back as a different part), so a board that is not already 4+ layers is
-	//    only upgraded when the caller said so out loud (T-11: route-critical
-	//    mis-counted a 2-layer board as 4 and this line quietly re-stacked it).
-	if live, _, ok := currentCopperLayerCount(cfg, window); ok && live >= 4 {
-		// Already deep enough — nothing to set, so nothing to guard.
-	} else if !allowStackupChange {
-		have := "unknown"
-		if ok {
-			have = fmt.Sprintf("%d", live)
+	// Only the explicit, preflighted upgrade may change the copper-layer count.
+	// Existing 4/6/8/... layer boards keep their stackup.
+	if targetLayers != liveLayers {
+		if _, err := requestAction(cfg, "pcb.stackup.set", window, map[string]any{"count": targetLayers}); err != nil {
+			return fmt.Errorf("set %d copper layers: %w", targetLayers, err)
 		}
-		return fmt.Errorf(
-			"power-planes needs >=4 copper layers but the board has %s — refusing to re-stack it.\n"+
-				"Inner planes only make sense on a 4+ layer board; on a 2-layer board use `pcb power-pour` instead.\n"+
-				"If you really do want this board re-stacked to 4 layers, say so explicitly:\n"+
-				"  easyeda pcb power-planes --allow-stackup-change\n"+
-				"  easyeda pcb stackup set --layers 4        # or do it as its own deliberate step",
-			have)
-	} else if _, err := requestAction(cfg, "pcb.stackup.set", window, map[string]any{"count": 4}); err != nil {
-		return fmt.Errorf("set 4 copper layers: %w", err)
 	}
 
 	// 3a. The pour recipe is pour-while-SIGNAL → flip → rebuild. On a re-run the
 	//     GND layer may ALREADY be 内电层/PLANE (a fresh pour directly on a PLANE
 	//     layer silently lands netless on L1 — the known bad path), so flip it
 	//     back to SIGNAL first.
-	//     写后回读放行(stale_read_optin.go):上一行的 pcb.stackup.set 刚关上
-	//     STALE_READ 门,而这里读的正是刚被它改过的叠层 —— 读不到就跳过回翻,
-	//     直接在 PLANE 层上浇铜,那是已知会静默落到 L1 的坏路径。放行位就地生成,
-	//     不落成变量:本命令后面还有一处 line.list 需要**单独**放行。
+	//     An explicit upgrade above may have closed the STALE_READ gate. This
+	//     read observes that stackup; later track reads opt in independently.
 	if planes, perr := fetchPcbPlaneLayers(staleReadOptIn(cfg, "power-planes 写后回读:stackup.set 之后确认 GND 层当前类型"), window); perr == nil {
 		for _, pl := range planes {
 			if pl.Layer == gndLayer {

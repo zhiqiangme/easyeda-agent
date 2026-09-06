@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 )
@@ -153,13 +154,14 @@ func TestCopperLayerCountFromResult(t *testing.T) {
 		}
 	}
 
-	cases := []struct {
+	type countCase struct {
 		name    string
 		result  map[string]any
 		want    int
 		wantOK  bool
 		wantSrc string
-	}{{
+	}
+	cases := []countCase{{
 		name:    "platform copperLayerCount wins",
 		result:  map[string]any{"copperLayerCount": float64(2), "layers": twoLayerBoard()},
 		want:    2,
@@ -206,15 +208,18 @@ func TestCopperLayerCountFromResult(t *testing.T) {
 		want:   0,
 		wantOK: false,
 	}, {
-		// layerStatus 缺失时按「启用」算 —— 只有明确的 0 才排除。
-		name: "a layer without layerStatus counts as enabled",
+		// 没有状态，不能证明铜层已经启用。
+		name: "a layer without layerStatus is not reliable evidence",
 		result: map[string]any{"layers": []any{
 			map[string]any{"id": float64(1), "name": "Top Layer", "type": "TOP"},
 			map[string]any{"id": float64(2), "name": "Bottom Layer", "type": "BOTTOM"},
 		}},
-		want:   2,
-		wantOK: true,
+		want:   0,
+		wantOK: false,
 	}}
+	for _, bad := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), 2.5, 3, 34} {
+		cases = append(cases, countCase{name: fmt.Sprintf("invalid platform count %v", bad), result: map[string]any{"copperLayerCount": bad}})
+	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

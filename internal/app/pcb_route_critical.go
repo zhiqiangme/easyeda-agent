@@ -320,7 +320,8 @@ auto-router handles worst are done deterministically FIRST, then locked:
 
 Then hand the REST to the normal tier (route-short / user-clicked native
 auto-route per the P7 ladder). Same stage gate as route-short; --dry-run plans
-and identifies without mutating.`,
+and identifies without mutating. A missing/stale copper-layer read or a conflict
+with --spec stackup.layers refuses before routing; no default layer count is assumed.`,
 		Example: `  easyeda pcb route-critical --project ceshi --dry-run
   easyeda pcb route-critical --project ceshi
   easyeda pcb route-critical --project ceshi --skip-power   # pairs only`,
@@ -346,25 +347,14 @@ and identifies without mutating.`,
 			if dryRun {
 				defer setDispatchDryRun(true)()
 			}
-			if !dryRun {
-				if err := gateRouteCommand(cfg, *window, "route-critical", forceReason, forceUnsafeReason, stderr); err != nil {
-					return err
-				}
-			}
 			out := map[string]any{"ok": true, "dryRun": dryRun}
-
-			// ── 1. power ───────────────────────────────────────────────────
-			// powerWrote 记「第 1 步真的往板上写了铜吗」—— 第 2 步那批读要不要带
-			// 写后回读放行位,完全由它决定(见下面 rcAfterPower 的注释)。
-			powerWrote := false
-			if skipPower {
-				out["power"] = "skipped (--skip-power)"
-			} else {
-				copper, copperSrc := copperLayerCount(cfg, *window, stderr)
-				out["copperLayerCount"] = copper
-				out["copperLayerCountSource"] = copperSrc
-				// spec 说了算:S0 的 stackup.layers 是**人写下的意图**,活板与它不
-				// 一致时 route-critical 不改板 —— 它是布线命令,不是叠层命令(T-11)。
+			copper, copperSrc := 0, ""
+			if !skipPower || declared > 0 {
+				var err error
+				copper, copperSrc, err = copperLayerCount(cfg, *window)
+				if err != nil {
+					return fmt.Errorf("route-critical stackup preflight: %w", err)
+				}
 				if declared > 0 {
 					out["copperLayerCountDeclared"] = declared
 					if declared != copper {
@@ -377,6 +367,21 @@ and identifies without mutating.`,
 					}
 					copperSrc = "spec (confirmed against " + copperSrc + ")"
 				}
+				out["copperLayerCount"] = copper
+				out["copperLayerCountSource"] = copperSrc
+			}
+			if !dryRun {
+				if err := gateRouteCommand(cfg, *window, "route-critical", forceReason, forceUnsafeReason, stderr); err != nil {
+					return err
+				}
+			}
+
+			// ── 1. power ───────────────────────────────────────────────────
+			// Only post-power reads may opt into observing this command's writes.
+			powerWrote := false
+			if skipPower {
+				out["power"] = "skipped (--skip-power)"
+			} else {
 				if copper >= 4 {
 					out["power"] = fmt.Sprintf("power-planes (%d-layer, from %s)", copper, copperSrc)
 					if err := runPowerPlanes(cfg, *window, 15, 16, true, dryRun, allowStackupChange, stderr, stderr); err != nil {
@@ -539,8 +544,8 @@ and identifies without mutating.`,
 	c.Flags().StringVar(&specPath, "spec", "", "S0 spec JSON — its stackup.layers is AUTHORITATIVE: when the live board\n"+
 		"disagrees the command refuses instead of re-stacking the board")
 	c.Flags().BoolVar(&allowStackupChange, "allow-stackup-change", false,
-		"permit the power step to CHANGE the board's copper layer count (pcb stackup set).\n"+
-			"Off by default: route-critical routes, it does not re-stack a board (T-11)")
+		"allow a confirmed <4-layer power-planes preflight to upgrade to 4 layers.\n"+
+			"Two-layer boards still select power-pour; unknown layer counts always refuse")
 	return c
 }
 
@@ -572,7 +577,7 @@ var copperLayerTypes = map[string]bool{"TOP": true, "BOTTOM": true, "SIGNAL": tr
 // 优先用平台自己的 copperLayerCount 字段(连接器直接转发
 // eda.pcb_Layer.getTheNumberOfCopperLayers()),它就是叠层对话框里的那个数。
 // 读不到时才退回数 layers[]:只数 copperLayerTypes 里的 type,且 layerStatus 必须
-// 不是 0(EPCB_LayerStatus.NOT_USED,即「不使用」)。
+// 为 SHOW(1) 或 HIDDEN(2)；缺失状态不能证明内层已启用。
 //
 // 这个 layerStatus 过滤是 T-11 的根。实测 2 层板的 pcb.layers.list 回 260 条 layer,
 // 其中 Inner1..Inner32 全是 type=SIGNAL、layerStatus=0(未启用),而真正的两层铜是
@@ -580,7 +585,7 @@ var copperLayerTypes = map[string]bool{"TOP": true, "BOTTOM": true, "SIGNAL": tr
 // 都数出 32 —— 一块 2 层板被判成 >=4 层,走进 power-planes,而 power-planes 头一件
 // 事就是 pcb.stackup.set{count:4},把一块已下单的 2 层板改成了 4 层。
 func copperLayerCountFromResult(result map[string]any) (int, string, bool) {
-	if v, ok := asFloatOK(result["copperLayerCount"]); ok && v >= 2 {
+	if v, ok := asFloatOK(result["copperLayerCount"]); ok && validCopperLayerCount(v) {
 		return int(v), "pcb.layers.list.copperLayerCount", true
 	}
 	raw, _ := result["layers"].([]any)
@@ -593,51 +598,40 @@ func copperLayerCountFromResult(result map[string]any) (int, string, bool) {
 		if !copperLayerTypes[strings.ToUpper(asString(m["type"]))] {
 			continue
 		}
-		// 缺 layerStatus 时按「启用」算 —— 只有明确的 NOT_USED(0) 才排除。
-		if st, ok := asFloatOK(m["layerStatus"]); ok && st == 0 {
-			continue
+		st, ok := asFloatOK(m["layerStatus"])
+		if !ok || (st != 0 && st != 1 && st != 2) {
+			return 0, "", false
 		}
-		n++
+		if st == 1 || st == 2 {
+			n++
+		}
 	}
-	if n < 2 {
+	if !validCopperLayerCount(float64(n)) {
 		return 0, "", false
 	}
 	return n, "pcb.layers.list.layers[] (enabled copper)", true
 }
 
-// copperLayerCount 读活板的已启用铜层数,返回层数与它的出处(出处进回执,让
-// 「为什么走了这条电源分支」事后可复查);读不到时按 2 层降级。
-//
-// 这个「读不到就当 2 层」的兜底在 STALE_READ 门下变得危险:板子若在本命令开跑前
-// 就脏(上一条命令写完没 reload),这一读会被门拒掉,于是一块 4 层板被静默当成 2
-// 层 —— 走的是 power-pour 而不是 power-planes,两条电源轨挤同一层,正是内电层要
-// 解决的那个冲突。**这一读按设计不放行**(它是命令入口的规划读,不是写后回读),
-// 所以唯一负责任的做法是把兜底说出来,别让分档决策静默走偏。
-func copperLayerCount(cfg *appConfig, window string, stderr io.Writer) (int, string) {
+// The stackup interface accepts even copper-layer counts from 2 through 32.
+// Reject malformed numbers before converting them to int or selecting a recipe.
+func validCopperLayerCount(n float64) bool {
+	return !math.IsNaN(n) && !math.IsInf(n, 0) && n >= 2 && n <= 32 && math.Trunc(n) == n && int(n)%2 == 0
+}
+
+// copperLayerCount requires live stackup evidence before choosing a power recipe.
+// A failed/stale read is not evidence of a two-layer board and cannot be bypassed
+// by an explicit stackup-change flag.
+func copperLayerCount(cfg *appConfig, window string) (int, string, error) {
 	res, err := requestAction(cfg, "pcb.layers.list", window, nil)
 	if err != nil {
 		if isStaleRead(err) {
-			fmt.Fprintf(stderr, "⚠ route-critical: 读不到叠层 —— %s\n   现在按 2 层降级(将走 power-pour 而不是 power-planes);若这是 4 层板,先 reload 再重跑\n",
-				staleReadNextStep("route-critical 的叠层入口读"))
-		} else {
-			fmt.Fprintf(stderr, "⚠ route-critical: 读不到叠层(%v)—— 按 2 层降级(将走 power-pour 而不是 power-planes)\n", err)
+			return 0, "", fmt.Errorf("read copper layers: %w — %s", err, staleReadNextStep("叠层入口读"))
 		}
-		return 2, "unreadable — fell back to 2"
+		return 0, "", fmt.Errorf("read copper layers: %w — inspect `easyeda pcb layers` before routing", err)
 	}
 	n, src, ok := copperLayerCountFromResult(res.Result)
 	if !ok {
-		fmt.Fprintln(stderr, "⚠ route-critical: pcb.layers.list 里没有可信的铜层证据 —— 按 2 层降级(将走 power-pour)")
-		return 2, "no copper evidence — fell back to 2"
+		return 0, "", fmt.Errorf("no reliable copper-layer evidence in pcb.layers.list — inspect `easyeda pcb layers` before routing; refusing to assume 2 layers")
 	}
-	return n, src
-}
-
-// currentCopperLayerCount 是 copperLayerCount 的静默版:同一份证据、同一套判据,
-// 但不写 stderr —— 给「决定要不要改板」这种非入口读用(pcb_powerplanes.go)。
-func currentCopperLayerCount(cfg *appConfig, window string) (int, string, bool) {
-	res, err := requestAction(cfg, "pcb.layers.list", window, nil)
-	if err != nil {
-		return 0, "", false
-	}
-	return copperLayerCountFromResult(res.Result)
+	return n, src, nil
 }
