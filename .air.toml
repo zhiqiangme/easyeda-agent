@@ -1,7 +1,7 @@
 # air live-reload config for the easyeda-agent daemon.
 #   make dev   (or: air)
 # Rebuilds bin and restarts `easyeda daemon` on any .go change. The EasyEDA
-# connector port-scans 49620-49629 in the background, so it auto-reconnects to
+# connector reconnects to 60832 in the background, so it auto-reconnects to
 # the freshly restarted daemon with no manual Reconnect.
 #   install air:  go install github.com/air-verse/air@latest
 root = "."
@@ -14,7 +14,8 @@ tmp_dir = "tmp"
   # relative to the hot-reloaded daemon.
   cmd = "make dev-build"
   bin = "./bin/easyeda"
-  args_bin = ["daemon","start"]
+  # Development must not overwrite the checked-out Skill with an older release.
+  args_bin = ["daemon","start","--auto-update-skill=false"]
   # only watch Go sources of the daemon/CLI; ignore the connector, tools, docs
   include_ext = ["go"]
   include_dir = ["cmd", "internal"]
