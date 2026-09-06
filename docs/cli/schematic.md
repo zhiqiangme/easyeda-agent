@@ -19,6 +19,7 @@ typed CLI 操作嘉立创EDA专业版的原理图——每个动作可观测、�
 | 符号/封装重绑 | `sch rebind-symbol` / `rebind-footprint` | 五步 rebind(modify→delete→create→restore) |
 | C 号解析 | `sch resolve-lcsc` | 已放置器件 → 真实 LCSC C 号(确定性,绝不模糊兜底);dry-run 默认 |
 | 属性修改 | `sch modify` | `--x/--y/--rotation/--designator` 快捷 flag,复杂属性走 `--patch`(两来源可并用,flag 覆盖同名键);**merge 语义**:只 patch 顶层字段(如 supplierId)时自动保留全部 otherProperty 并回报 `propertiesPreserved`(#175) |
+| 位号修复 | `sch designators allocate / plan / verify` | 全工程 IR 按官方库前缀分配非标准位号；保留已有数字编号，功能名存 role。生成同页 modify 队列，文件 SHA 与现场前后数据守卫检查 ID、引脚、网、位置、导线并同步组成员；经 `sch apply` 执行 |
 | 删除 | `sch prim-delete` / `sch clear` | 唯一删除入口:按 id 删**任意图元**(器件、文本、图形、导线)/ 整页清空(dry-run 可数)。旧 `sch delete`(仅器件)已移除 |
 
 ### 2. 连线与网络

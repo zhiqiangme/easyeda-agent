@@ -217,6 +217,25 @@ near-equivalent, first).
 
 ## Bulk realization from a netlist (automated)
 
+位号在放置前分配，功能名称独立存入 IR 的 `role`。`ref` 必须是英文字母前缀加数字，
+已有正常位号保留大小写、前导零和声明顺序。修复历史 `U_RF`、`J_AUDIO_MOD` 等错误名称时，
+先用 `lib device get` 读取官方 `device.property.designator`，不能按器件用途强制改成 `J`。
+官方 `U?`、`CN?` 是分配前缀的依据，不能把这个占位属性写回已有实例。
+
+```bash
+easyeda sch designators allocate project-connectivity.json \
+  --prefixes library-prefixes.json --out numbered.json --changes changes.json
+easyeda sch designators plan numbered.json --before page-before.json --out rename-apply.json
+easyeda sch apply rename-apply.json --project <project> --doc <existing-page>
+```
+
+`library-prefixes.json` 为 `{"<libraryUuid>/<deviceUuid>":"CN?"}` 映射，来自保存的官方查询响应。
+分配输入须覆盖全工程以避开跨页编号占用；每页 plan 使用新鲜的
+`sch list --include-pins --include-bbox --include-wires --include-device-identity` 信封。
+Apply 原地修改位号和 ID/role 绑定，校验器件身份、引脚/网络/NC、位置及导线保持不变，
+再同步本页组登记并保存。修正源 JSON 中的 ref 后同步局部几何的位号引用；后续
+`compose` / `materialize` 会拒绝再次放置非标准位号。组件 ID 不可从新 ref 重新生成。
+
 For a whole board (place ~N parts + wire the full netlist at once), the manual flow
 above doesn't scale. Pipeline (proven on box-v2/110 parts):
 

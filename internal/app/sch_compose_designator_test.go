@@ -34,7 +34,7 @@ func composeOriginalRefsFixture(refs []string) schCompositionSource {
 }
 
 func TestComposePreservesOriginalDesignatorSpellingAndDeclarationOrder(t *testing.T) {
-	refs := []string{"C1", "C10", "C2", "U_RF", "uRf_01", "C007"}
+	refs := []string{"C1", "C10", "C2", "U3", "u04", "C007"}
 	s := composeOriginalRefsFixture(refs)
 	original, _ := json.Marshal(s)
 	p, err := planSchComposition(s)
@@ -79,11 +79,11 @@ func TestComposePreservesOriginalDesignatorSpellingAndDeclarationOrder(t *testin
 }
 
 func TestComposeRejectsRenumberedPrefixedOrRecasedDesignatorsBeforeApply(t *testing.T) {
-	for _, wrong := range []string{"U1", "RF_U_RF", "u_rf", "U_RF1"} {
-		s := composeOriginalRefsFixture([]string{"C1", "C10", "C2", "U_RF", "C007"})
+	for _, wrong := range []string{"U3", "RF_U03", "u03", "U031"} {
+		s := composeOriginalRefsFixture([]string{"C1", "C10", "C2", "U03", "C007"})
 		s.Modules[0].Placements[3].Designator = wrong
 		if p, err := planSchComposition(s); err == nil || p != nil {
-			t.Fatalf("rewritten %q produced a plan from canonical U_RF: %v", wrong, err)
+			t.Fatalf("rewritten %q produced a plan from canonical U03: %v", wrong, err)
 		}
 	}
 	s := composeOriginalRefsFixture([]string{"C007"})
@@ -93,14 +93,36 @@ func TestComposeRejectsRenumberedPrefixedOrRecasedDesignatorsBeforeApply(t *test
 	}
 }
 
+func TestComposeRejectsLegacyFunctionalDesignatorsBeforeMutationQueue(t *testing.T) {
+	for _, legacy := range []string{"U_RF", "J_PROG_RF", "uRf_01"} {
+		t.Run(legacy, func(t *testing.T) {
+			s := composeOriginalRefsFixture([]string{"U1", legacy})
+			p, err := planSchComposition(s)
+			if err != nil {
+				t.Fatalf("historical data must remain readable for repair: %v", err)
+			}
+			before, _ := json.Marshal(p)
+			// Even perfectly matching historical geometry cannot authorize replay.
+			// Designator preflight must run before the baseline is read or reset.
+			if pb, err := schCompositionPlaybook(p, nil, true); err == nil || pb != nil || !strings.Contains(err.Error(), "nonstandard designator") || !strings.Contains(err.Error(), legacy) {
+				t.Fatalf("historical reference produced a mutation queue: %v", err)
+			}
+			after, _ := json.Marshal(p)
+			if string(before) != string(after) {
+				t.Fatal("failed preflight altered the canonical source")
+			}
+		})
+	}
+}
+
 func TestGroupStableRefsSurviveIdempotentReorderingAndEdits(t *testing.T) {
-	refs := []string{"C2", "C1", "C10", "uRf_01", "C007"}
+	refs := []string{"C2", "C1", "C10", "u04", "C007"}
 	groups, g, _, err := groupsCreateWithProvenance(nil, "original-Lib", refs, "", "", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	before, _ := json.Marshal(groups)
-	reordered := []string{"C007", "uRf_01", "C10", "C1", "C2"}
+	reordered := []string{"C007", "u04", "C10", "C1", "C2"}
 	_, same, unchanged, err := groupsCreateWithProvenance(groups, "original-Lib", reordered, "", "", nil, true)
 	if err != nil || !unchanged || same != g {
 		t.Fatalf("same exact identities should no-op despite input order: %v", err)
@@ -109,7 +131,7 @@ func TestGroupStableRefsSurviveIdempotentReorderingAndEdits(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatal("idempotent call rewrote original order/timestamp")
 	}
-	reordered[1] = "URF_01"
+	reordered[1] = "U04"
 	if _, _, _, err := groupsCreateWithProvenance(groups, "original-Lib", reordered, "", "", nil, true); err == nil {
 		t.Fatal("recased declaration silently treated as equivalent")
 	}
@@ -119,14 +141,14 @@ func TestGroupStableRefsSurviveIdempotentReorderingAndEdits(t *testing.T) {
 	if !reflect.DeepEqual(g.Members, append(append([]string{}, refs...), "r09")) {
 		t.Fatal("append reordered or recased existing members")
 	}
-	if _, _, _, err := groupsRemoveMembers(groups, g.ID, []string{"URF_01"}); err != nil {
+	if _, _, _, err := groupsRemoveMembers(groups, g.ID, []string{"U04"}); err != nil {
 		t.Fatalf("legacy case-insensitive removal must still locate original spelling: %v", err)
 	}
 	if !reflect.DeepEqual(g.Members, []string{"C2", "C1", "C10", "C007", "r09"}) {
 		t.Fatalf("removal changed surviving identities: %v", g.Members)
 	}
-	roles, err := parseGroupRolesFlag("CORE=uRf_01,OUT=C007")
-	if err != nil || roles["CORE"] != "uRf_01" || roles["OUT"] != "C007" {
+	roles, err := parseGroupRolesFlag("CORE=u04,OUT=C007")
+	if err != nil || roles["CORE"] != "u04" || roles["OUT"] != "C007" {
 		t.Fatalf("role references were recased: %v %v", roles, err)
 	}
 }

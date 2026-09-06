@@ -227,7 +227,8 @@ easyeda sch apply .easyeda/tmp/plan.json --window <id>
 离线结构检查用于规划；执行时回读用于证明写入，二者职责不同。
 
 `sch compose` 将完整 Lib 几何编译为受保护队列：create 使用零旋转，再用绝对 modify
-设置已测位置与朝向；接线前核对实测 bbox/全部引脚，最终 `expectSchematic` 核对
+设置已测位置与朝向，并写入稳定 component ID/可选 role，逐字段核验绑定回执；
+`materialize` 在 place 后也用 typed modify 绑定。接线前核对实测 bbox/全部引脚，最终 `expectSchematic` 核对
 net/NC、导线路径及标记方向。清页后用 `sch clear --dry-run --expect-empty` 检查全图元，
 枚举警告不能当空页。新增位号用 `absentParts` 检查工程内未被占用；空 `parts:{}`
 须配合 `exactParts:true`（空集合）或非空 `absentParts`（允许其他器件）。
@@ -238,7 +239,9 @@ NC 和活动页 `connectivitySummary.wires/buses == 0` 的证据。执行时再�
 同时读取 summary。已完全匹配时保留电路，继续模块框及最终验收。
 
 规划逐段拦截导线穿过标记本体/文字，同网也不能穿字；正常引线可终止在锚点。
-位号保留输入原文与声明顺序（含大小写、前导零和下划线），不自动编号或添加前缀。
+正常数字位号保留输入原文与声明顺序（含大小写、前导零）。功能名称、下划线位号和
+未编号的 `?` 在生成放置队列前拒绝；先用 `sch designators allocate` 根据官方库前缀
+修复源数据，再生成 `sch designators plan` 原地修改队列。功能名存 role，不作为 ref。
 按 Lib 登记 `sch group create --if-absent`，同名组仅在完整成员和溯源/角色完全一致时
 复用，再通过 `sch gate --strict`。单页不足可按功能拆两页，每页提供完整且位号不重复的
 器件子集，分别运行 `compose`；命令不自动分页或删除源页。完整契约见

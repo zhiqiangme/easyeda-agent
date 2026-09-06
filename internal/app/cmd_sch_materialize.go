@@ -33,7 +33,7 @@ func newSchMaterializeCmd(stdout, stderr io.Writer) *cobra.Command {
 			if err := json.Unmarshal(raw, &d); err != nil {
 				return fmt.Errorf("读取 connectivity JSON: %w", err)
 			}
-			if err := d.Validate(); err != nil {
+			if err := connectivity.ValidatePlacementDesignators(d); err != nil {
 				return fmt.Errorf("数据结构校验失败: %w", err)
 			}
 			if onlyPage != "" {
@@ -102,6 +102,8 @@ func newSchMaterializeCmd(stdout, stderr io.Writer) *cobra.Command {
 						placePayload["mirror"] = true
 					}
 					pb.Steps = append(pb.Steps, playbookStep{ID: "place-" + c.Ref, Name: "place " + c.Ref, Action: "schematic.component.place", Payload: placePayload, Capture: map[string]string{c.Ref: "$.primitiveId"}})
+					patch, assertions := schComponentBinding(c)
+					pb.Steps = append(pb.Steps, playbookStep{ID: "bind-" + c.Ref, Name: "bind " + c.Ref, Action: "schematic.component.modify", Payload: map[string]any{"primitiveId": "${" + c.Ref + "}", "patch": patch}, Assert: assertions})
 				}
 				if withConnectivity {
 					for _, edge := range d.Connections {
@@ -146,6 +148,22 @@ func newSchMaterializeCmd(stdout, stderr io.Writer) *cobra.Command {
 	c.Flags().BoolVar(&withConnectivity, "with-connectivity", false, "also emit pin-to-net connect_pin steps (use on an empty target page)")
 	c.Flags().StringVar(&onlyPage, "page", "", "materialize only one page by page name or UUID")
 	return c
+}
+
+// Instance identity belongs to the canonical graph, not the visible reference.
+// Place has no custom-property contract; bind through typed modify and verify
+// its returned fields before the queue may proceed to wiring or saving.
+func schComponentBinding(c connectivity.Component) (map[string]any, map[string]string) {
+	properties := map[string]any{connectivity.ComponentIDProperty: c.ID}
+	assertions := map[string]string{
+		"$.component.designator": "==" + c.Ref,
+		"$.component.otherProperty." + connectivity.ComponentIDProperty: "==" + c.ID,
+	}
+	if c.Role != "" {
+		properties[connectivity.ComponentRoleProperty] = c.Role
+		assertions["$.component.otherProperty."+connectivity.ComponentRoleProperty] = "==" + c.Role
+	}
+	return map[string]any{"designator": c.Ref, "otherProperty": properties}, assertions
 }
 
 func isDeviceLibraryUUID(s string) bool {

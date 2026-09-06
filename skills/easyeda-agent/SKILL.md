@@ -72,6 +72,7 @@ EasyEDA tooling.
 15. **原理图按功能模块画框并标标题** — 默认先完成一页,分页需按功能另行设计。每个 Lib 的呈现数据包含虚线框和粉色标题,标题字高 **0.2 inch = 20 原理图坐标单位**。框包住核心器件、外围、导线和电源符号；页边/框内最小边距、模块间距与标题内缩统一10 raw（0.1 inch / 2.54 mm），标题净距5 raw；图签同样保留10 raw净距。先计算再 Apply 并回读。1.4 不提供独立 Notes 功能,不要求每模块说明。→ design-flow S1–S3
 16. **「探出图纸」≠「比图纸还大」** — 前者挪一挪能解;后者(`page-too-small`)挪多少次都没用,必须换手段,且**分页是设计决策 → 停手问用户**(工具不自动分页)。别人肉重试:`--max-attempts`(默认 3)会替你停手。→ design-flow S3
 17. **S0 先于任何放置** — spec 必须在首个 `page-new` / `place` / `block-apply` 前落盘并通过 `easyeda spec validate --strict`;先画后补只能算记录,不能证明设计决策已冻结。→ design-flow S0
+18. **位号与功能名分开** — `component.id` 稳定、`ref` 为器件库前缀加数字、功能名存 `role`。保留已有正常位号的拼写、顺序和前导零；修正历史功能位号先查 `lib device get` 的 `property.designator`，端子也不可凭用途强制指定 `J`。`sch designators` 从全工程数据分配，只修改非标准项，再经受保护的 `sch apply` 原地写入。不得从 ID 反推 ref，也不得覆盖原生 `uniqueId`。→ references/schematic.md
 
 ## ② 流程停点 + 档位默认 + 块地图速查
 

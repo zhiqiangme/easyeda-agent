@@ -641,8 +641,9 @@ already-full page honestly reports **"no free slot"** rather than overlapping �
 10 raw，框内至少10，标题净距5；图签 keepout不占用。旧 `materialize` 的逐脚标签
 不能代替该链路。字段与验证边界见 `docs/schematic-page-composition.md`。
 
-位号是输入身份：原样保留大小写、前导零、下划线及声明顺序，不为 DRC 格式 INFO
-改名或重新编号。Lib 登记同样保留原文；重复登记只比较精确位号集合，不重排现有成员。
+正常数字位号原样保留大小写、前导零及声明顺序；功能名称和非标准下划线位号必须
+先按官方库前缀修复，功能名独立存入 role，稳定 ID 不变。Lib 登记同样保留正常位号原文；
+重复登记只比较精确位号集合，不重排现有成员。`sch designators` 的修复队列同步组内引用。
 端子直接连网络端口时，用模块 `terminals:[{designator,pin,direction,kind?}]` 声明，
 网名和起点从已验证的引脚数据读取。规划器沿指定外侧方向选择最短合法直线，
 相邻标签用错落线长避让；不要先手写长折线再交给组合器。器件朝向仍由输入的

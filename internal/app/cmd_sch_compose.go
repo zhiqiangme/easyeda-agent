@@ -422,6 +422,9 @@ func schCompositionExpectation(p *schCompositionPlan, final bool) *schematicStat
 }
 
 func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool) (*playbook, error) {
+	if err := connectivity.ValidatePlacementDesignators(p.Connectivity); err != nil {
+		return nil, fmt.Errorf("composition placement designators: %w", err)
+	}
 	var env struct {
 		Result  map[string]any `json:"result"`
 		Context struct {
@@ -563,12 +566,15 @@ func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool) 
 				byRef[c.Ref] = c
 			}
 			for i, c := range p.Layout.Placements {
-				d := byRef[c.Designator].Device
+				canonical := byRef[c.Designator]
+				d := canonical.Device
 				payload := map[string]any{"libraryUuid": d.LibraryUUID, "uuid": d.UUID, "x": c.X, "y": c.Y, "rotation": 0, "mirror": false, "designator": c.Designator}
 				pb.Steps = append(pb.Steps, playbookStep{ID: fmt.Sprintf("place-%03d", i), Action: "schematic.component.place", Payload: payload, Capture: map[string]string{fmt.Sprintf("part_%03d", i): "$.primitiveId"}})
 				// Create uses the opposite rotation sign on current EasyEDA builds.
 				// Absolute modify has the stored-rotation contract used by measured IR.
-				pb.Steps = append(pb.Steps, playbookStep{ID: fmt.Sprintf("orient-%03d", i), Action: "schematic.component.modify", Payload: map[string]any{"primitiveId": fmt.Sprintf("${part_%03d}", i), "patch": map[string]any{"rotation": c.Rotation, "mirror": c.Mirror, "x": c.X, "y": c.Y}}})
+				patch, assertions := schComponentBinding(canonical)
+				patch["rotation"], patch["mirror"], patch["x"], patch["y"] = c.Rotation, c.Mirror, c.X, c.Y
+				pb.Steps = append(pb.Steps, playbookStep{ID: fmt.Sprintf("orient-%03d", i), Action: "schematic.component.modify", Payload: map[string]any{"primitiveId": fmt.Sprintf("${part_%03d}", i), "patch": patch}, Assert: assertions})
 			}
 		}
 		pb.Steps = append(pb.Steps, playbookStep{ID: "verify-physical-pins-before-wiring", Action: "schematic.components.list", Payload: read, ExpectSchematic: schCompositionExpectation(p, false)})

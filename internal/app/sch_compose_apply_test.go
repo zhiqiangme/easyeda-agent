@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
 )
 
 // Build an explicit native readback for the synthetic circuit. The complete
@@ -103,6 +105,7 @@ func composeStep(t *testing.T, pb *playbook, id string) (int, *playbookStep) {
 
 func TestComposeApplyUsesAbsolutePoseAfterZeroRotationCreate(t *testing.T) {
 	p, env := composeApplyFixture(t, false)
+	p.Connectivity.Components[0].Role = "rf_mcu"
 	pb, err := schCompositionPlaybook(p, composeApplyBytes(t, env), true)
 	if err != nil {
 		t.Fatal(err)
@@ -135,6 +138,22 @@ func TestComposeApplyUsesAbsolutePoseAfterZeroRotationCreate(t *testing.T) {
 		if patch["rotation"] != c.Rotation || patch["mirror"] != c.Mirror || patch["x"] != c.X || patch["y"] != c.Y {
 			t.Fatalf("%s absolute stored pose lost: %+v", c.Designator, patch)
 		}
+		canonical := p.Connectivity.Components[i]
+		properties, ok := patch["otherProperty"].(map[string]any)
+		if !ok || properties[connectivity.ComponentIDProperty] != canonical.ID || patch["designator"] != canonical.Ref {
+			t.Fatalf("canonical identity must survive fresh placement: %+v", patch)
+		}
+		if canonical.Role != "" {
+			if properties[connectivity.ComponentRoleProperty] != canonical.Role {
+				t.Fatal("functional role must be bound independently of the visible reference")
+			}
+		} else if _, exists := properties[connectivity.ComponentRoleProperty]; exists {
+			t.Fatal("placement must not invent a role")
+		}
+		if create.Payload["otherProperty"] != nil || create.Payload["customAttributes"] != nil {
+			t.Fatal("place must not rely on unsupported custom-property inputs")
+		}
+		assertComponentBindingReadback(t, orient, canonical)
 		if pinGate.ExpectSchematic.Parts[c.Designator].BBox == nil || len(pinGate.ExpectSchematic.Parts[c.Designator].Pins) != len(c.Pins) {
 			t.Fatal("pre-wiring gate must cover real bbox and every physical pin")
 		}
