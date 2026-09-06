@@ -124,7 +124,10 @@ func powerLayoutPlaybook(plan *powerLayoutPlan, sourceRaw []byte) (*playbook, er
 	}
 	pb.Steps = append(pb.Steps, playbookStep{ID: "verify-position-before-wiring", Action: "schematic.components.list", Payload: readPayload, ExpectSchematic: powerLayoutExpectation(plan, false), Assert: cleanCounts})
 	for i, w := range plan.Wires {
-		pb.Steps = append(pb.Steps, playbookStep{ID: fmt.Sprintf("wire-%d", i+1), Action: "schematic.wire.create", Payload: map[string]any{"points": w.Points, "net": w.Net}, Capture: map[string]string{fmt.Sprintf("WIRE_%d", i+1): "$.primitiveId"}})
+		// The plan carries the net, but each connected tree gets its name from
+		// the local symbol below. EasyEDA persists an attribute for EVERY named
+		// segment; merging two "+3V3" segments produces a duplicate-name DRC.
+		pb.Steps = append(pb.Steps, playbookStep{ID: fmt.Sprintf("wire-%d", i+1), Name: w.Net + " direct wire", Action: "schematic.wire.create", Payload: map[string]any{"points": w.Points}, Capture: map[string]string{fmt.Sprintf("WIRE_%d", i+1): "$.primitiveId"}})
 	}
 	for i, f := range plan.Flags {
 		pb.Steps = append(pb.Steps, playbookStep{ID: fmt.Sprintf("local-symbol-%d", i+1), Action: "schematic.power.connect_pin", Payload: map[string]any{"pinX": f.PinX, "pinY": f.PinY, "kind": f.Kind, "net": f.Net, "direction": f.Direction, "offset": f.Offset}})

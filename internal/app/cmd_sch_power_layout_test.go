@@ -36,7 +36,8 @@ func powerLayoutFixture(t *testing.T, shiftX, shiftY, capSpan float64, turns int
 		for _, p := range c.Pins {
 			pins = append(pins, map[string]any{"pinNumber": p.Number, "pinName": p.Name, "net": p.Net, "x": p.X, "y": p.Y})
 		}
-		comps = append(comps, map[string]any{"primitiveId": c.PrimitiveID, "designator": c.Designator, "componentType": "part", "x": c.X, "y": c.Y, "rotation": c.Rotation, "mirror": c.Mirror, "bbox": c.BBox, "pins": pins, "pinsAvailable": true})
+		value := map[string]string{"C1": "100nF", "C2": "10uF", "C3": "22uF"}[c.Designator]
+		comps = append(comps, map[string]any{"primitiveId": c.PrimitiveID, "designator": c.Designator, "componentType": "part", "x": c.X, "y": c.Y, "rotation": c.Rotation, "mirror": c.Mirror, "bbox": c.BBox, "pins": pins, "pinsAvailable": true, "otherProperty": map[string]any{"Value": value}})
 	}
 	return map[string]any{"context": map[string]any{"documentUuid": "power-doc"}, "result": map[string]any{"components": comps}}
 }
@@ -190,5 +191,46 @@ func TestPowerLayoutCanonicalizesOnlyRoundoff(t *testing.T) {
 	c["pins"].([]any)[0].(map[string]any)["x"] = 400.01
 	if _, err := planPowerLayout(powerLayoutBytes(t, f), powerLayoutTestOptions()); err == nil {
 		t.Fatal("genuinely off-grid measurement was silently snapped")
+	}
+}
+
+func TestPowerLayoutSpacingAccountsForAnnotationsAndMarkerName(t *testing.T) {
+	fixture := powerLayoutFixture(t, 0, 0, 20, 3)
+	base, err := planPowerLayout(powerLayoutBytes(t, fixture), powerLayoutTestOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, first, second := base.Placements[1], base.Placements[2], base.Placements[3]
+	markerLeft := plPin(base.Placements[0], "2").X - 4*schAnchorGrid - math.Max(markerBBoxProfile("power", "+3V3").Far, plPowerTextWidth("+3V3")/2)
+	if plPin(input, "1").X+plPowerCapRightReach(input)+bslPartGap > markerLeft {
+		t.Fatal("input value/designator text must clear the duplicate VOUT marker")
+	}
+	if plPin(first, "1").X+plPowerCapRightReach(first)+bslPartGap > second.BBox.MinX {
+		t.Fatal("output annotation column must clear the next capacitor")
+	}
+	powerLayoutTestComp(fixture, 3)["otherProperty"] = map[string]any{"Value": "1000uF / 50V"} // C2
+	powerLayoutTestComp(fixture, 2)["otherProperty"] = map[string]any{"Value": "470uF / 25V"}  // C1
+	long, err := planPowerLayout(powerLayoutBytes(t, fixture), powerLayoutTestOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if long.Placements[1].X >= input.X || long.Placements[3].X <= second.X {
+		t.Fatal("longer component values must widen the annotation reserve")
+	}
+	fixture = powerLayoutFixture(t, 0, 0, 20, 3)
+	for i := 1; i <= 4; i++ {
+		for _, p := range powerLayoutTestComp(fixture, i)["pins"].([]any) {
+			pin := p.(map[string]any)
+			if pin["net"] == "+3V3" {
+				pin["net"] = "VCC_MAIN_3V3"
+			}
+		}
+	}
+	wideNet, err := planPowerLayout(powerLayoutBytes(t, fixture), powerLayoutTestOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wideNet.Placements[1].X >= input.X {
+		t.Fatal("longer duplicate output net names must widen the input corridor")
 	}
 }

@@ -1,0 +1,31 @@
+# 固定 LDO 数据布局验收
+
+2026-09-06，AMS1117-3.3 POWER 页完成本地数据计算 → 顺序 SCH Apply → 回读 → 严格门禁 → 官方导图。
+本验收仅覆盖一个核心、一个输入电容、两个输出电容，不代表整板或任意芯片的自动布局已通过。
+
+## 结果
+
+- VIN 左侧直连输入电容；右侧水平 VOUT 直连两个竖直输出电容，各自就近接地。
+- 保留全部 4 个器件、10 个物理引脚；逐 pin 网表与变更前批准的黄金表完全一致。
+- `sch gate --strict` 的 layout-lint、clusters、check、bridge-check、DRC 全通过，0 告警。
+- 软件回归覆盖 12 组朝向/位置/引脚跨度，以及浮点误差、长标注、错误网表、穿件/交叉和 Apply 状态失配。
+- 这些是实测几何驱动的确定性回归样本，不是机器学习模型训练。
+
+## 可复用流程
+
+1. 保存实测 `components.list`（bbox、pin、rotation、mirror、导线清单）和已批准的 pin→net。
+2. 校准符号朝向。本例核心 `mirror=true, rotation=180` 得到 VIN 左上、GND 左下、VOUT4 右侧；此值不能直接套到其他库符号。
+3. `sch power-layout --from geometry.json --at 300,650 --out plan.json --playbook apply.json`。
+4. `sch apply apply.json --dry-run`，再执行；生成队列在清旧线前检查源几何、在画线前逐 pin 检查新几何、结束时检查完整网表并保存。
+5. `sch gate --strict --json`；官方导图用于检查文字和阅读顺序，不替代电气数据校验。
+
+## 实测修正与边界
+
+- 仅有本体 bbox 不够：电容位号/Value、网名和组间净距必须进入间距计算。
+- 原理图导线 `net` 参数会写入显式名称属性。多个同名线段合并后，官方 DRC 仍会报重复网名；本规划器使用局部符号命名连续线树，计划及验收保留每条线的电气网络。
+- 删线后首次创建线偶发 `create failed!`。本次队列立即停止，回读确认 0 条线后，从画线前几何检查点恢复成功；未自动重试未知状态的写入。
+- 连接器 1.4.1 的 `includeWires` 尚未返回导线 ID；实测用官方只读 `getAll()` 补充。生成破坏性队列必须有完整 ID，缺失即拒绝。
+- 第 2 脚和 tab/第 4 脚同属 VOUT。第 2 脚位于输入侧，因此保留短的向左电源标记，避免环绕或穿越相邻 VIN/GND；它不是第二路输出。
+- [原厂手册](https://atta.szlcsc.com/upload/public/pdf/source/20180727/C6186_7A095716F0823C02F1997A905E26C086.pdf)第 4 页明确以 22 µF 固体钽输出电容保证稳定。本例 22 µF 陶瓷保留作布局验证，不能据此声称硬件稳定性已通过。
+
+完整现场数据、计划、日志及导图保存在 Git 忽略目录 `.easyeda/tmp/power-validation/`。

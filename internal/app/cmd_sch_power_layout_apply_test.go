@@ -23,6 +23,11 @@ func TestPowerLayoutApplyGatesBeforeWiresAndSavesAfterTopology(t *testing.T) {
 		if s.Action == "schematic.wire.create" && !positionChecked {
 			t.Fatal("wire precedes measured pin verification")
 		}
+		if s.Action == "schematic.wire.create" {
+			if _, named := s.Payload["net"]; named {
+				t.Fatal("do not duplicate wire net-name attributes; local symbols name the connected trees")
+			}
+		}
 		if s.ID == "verify-all-pin-nets" {
 			topologyChecked = true
 			for _, c := range plan.Placements {

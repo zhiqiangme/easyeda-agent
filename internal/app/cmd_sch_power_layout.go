@@ -34,6 +34,7 @@ type powerLayoutPin struct {
 type powerLayoutPlacement struct {
 	PrimitiveID string           `json:"primitiveId"`
 	Designator  string           `json:"designator"`
+	Value       string           `json:"value,omitempty"`
 	X           float64          `json:"x"`
 	Y           float64          `json:"y"`
 	Rotation    float64          `json:"rotation"`
@@ -68,16 +69,18 @@ type powerLayoutPlan struct {
 
 type powerLayoutSnapshot struct {
 	Components []struct {
-		PrimitiveID   string      `json:"primitiveId"`
-		Designator    string      `json:"designator"`
-		ComponentType string      `json:"componentType"`
-		X             *float64    `json:"x"`
-		Y             *float64    `json:"y"`
-		Rotation      *float64    `json:"rotation"`
-		Mirror        *bool       `json:"mirror"`
-		BBox          *layoutBBox `json:"bbox"`
-		PinsAvailable *bool       `json:"pinsAvailable"`
-		NetAmbiguous  bool        `json:"netAmbiguous"`
+		PrimitiveID   string         `json:"primitiveId"`
+		Designator    string         `json:"designator"`
+		Value         string         `json:"value"`
+		OtherProperty map[string]any `json:"otherProperty"`
+		ComponentType string         `json:"componentType"`
+		X             *float64       `json:"x"`
+		Y             *float64       `json:"y"`
+		Rotation      *float64       `json:"rotation"`
+		Mirror        *bool          `json:"mirror"`
+		BBox          *layoutBBox    `json:"bbox"`
+		PinsAvailable *bool          `json:"pinsAvailable"`
+		NetAmbiguous  bool           `json:"netAmbiguous"`
 		Pins          []struct {
 			Number string   `json:"pinNumber"`
 			Name   string   `json:"pinName"`
@@ -270,7 +273,11 @@ func planPowerLayout(raw []byte, o powerLayoutOptions) (*powerLayoutPlan, error)
 		// API trigonometry can return e.g. 204.99999999999997 for a grid
 		// coordinate. Accept only a tiny tolerance, then canonicalize before
 		// exact orthogonality/segment checks; do not silently snap real errors.
-		p := powerLayoutPlacement{PrimitiveID: c.PrimitiveID, Designator: c.Designator, X: snapAnchor(*c.X), Y: snapAnchor(*c.Y), Rotation: math.Round(*c.Rotation/90) * 90, Mirror: *c.Mirror, BBox: *c.BBox}
+		value := c.Value
+		if value == "" {
+			value, _ = c.OtherProperty["Value"].(string)
+		}
+		p := powerLayoutPlacement{PrimitiveID: c.PrimitiveID, Designator: c.Designator, Value: value, X: snapAnchor(*c.X), Y: snapAnchor(*c.Y), Rotation: math.Round(*c.Rotation/90) * 90, Mirror: *c.Mirror, BBox: *c.BBox}
 		numbers := map[string]bool{}
 		for _, pin := range c.Pins {
 			if pin.Number == "" || numbers[pin.Number] || pin.X == nil || pin.Y == nil || !plGrid(*pin.X) || !plGrid(*pin.Y) || pin.Net == nil || *pin.Net == "" || pin.NC {
@@ -322,19 +329,23 @@ func planPowerLayout(raw []byte, o powerLayoutOptions) (*powerLayoutPlan, error)
 	if !(p3.X < core.BBox.MinX && p4.X > core.BBox.MaxX && p1.X == p2.X && p2.X == p3.X && p1.Y < p2.Y && p2.Y < p3.Y) {
 		return nil, fmt.Errorf("unsupported core pin orientation: calibrate VIN-left/VOUT4-right with GND below VOUT2/VIN before planning")
 	}
-	plan := &powerLayoutPlan{SchemaVersion: 1, DocumentID: doc, Placements: []powerLayoutPlacement{core}, ExpectedPinNets: map[string]string{}, Notes: []string{"Fixed AMS1117 topology; input and output shunt capacitors are vertical with pin1 up and pin2 down.", "Pin 2 duplicates VOUT electrically; its short left-facing local power symbol avoids routing around the core. Main VOUT pin 4 directly wires both output capacitors.", "Symbol text/flag rendered bboxes must be checked after apply; this offline plan verifies part bodies, pin positions and all wire segments."}}
+	plan := &powerLayoutPlan{SchemaVersion: 1, DocumentID: doc, Placements: []powerLayoutPlacement{core}, ExpectedPinNets: map[string]string{}, Notes: []string{"Fixed AMS1117 topology; input and output shunt capacitors are vertical with pin1 up and pin2 down.", "Pin 2 duplicates VOUT electrically; its short left-facing local power symbol avoids routing around the core. Main VOUT pin 4 directly wires both output capacitors.", "Spacing reserves capacitor designator/value text and marker names using the shared text-width model plus the cluster gap. Rendered text/flag bboxes still require post-apply verification."}}
 	input, err := plVertical(parts[o.InputCap])
 	if err != nil {
 		return nil, err
 	}
-	// Reserve the left-facing duplicate VOUT marker beside the core, not a
-	// whole-page bus. Width follows the symbol body and standard stub length.
-	inputGap := plCeil(math.Max(2*schStubLen, input.BBox.MaxX-input.BBox.MinX+4*schAnchorGrid))
+	// A component bbox excludes its designator/value. Reserve that right-hand
+	// text column before the duplicate VOUT marker, including the same 20-unit
+	// cluster clearance used by the live gate. The marker name is centered on
+	// its stub; reserve its half-width on the capacitor-facing side.
+	duplicateReach := 4*schAnchorGrid + math.Max(markerBBoxProfile("power", outNet).Far, plPowerTextWidth(outNet)/2)
+	inputGap := plCeil(math.Max(2*schStubLen, plPowerCapRightReach(input)+bslPartGap+duplicateReach))
 	ip := plPin(input, "1")
 	input = plTranslate(input, plFloor(p3.X-inputGap)-ip.X, p3.Y-ip.Y)
 	plan.Placements = append(plan.Placements, input)
 	plan.Wires = append(plan.Wires, powerLayoutWire{Net: inNet, Points: [][2]float64{{plPin(input, "1").X, p3.Y}, {p3.X, p3.Y}}})
 	previous := p4
+	var previousCap *powerLayoutPlacement
 	for _, r := range refs[2:] {
 		c, err := plVertical(parts[r])
 		if err != nil {
@@ -342,11 +353,19 @@ func planPowerLayout(raw []byte, o powerLayoutOptions) (*powerLayoutPlan, error)
 		}
 		pin := plPin(c, "1")
 		gap := plCeil(math.Max(2*schStubLen, c.BBox.MaxX-c.BBox.MinX+4*schAnchorGrid))
+		if previousCap != nil {
+			// Consecutive output capacitors share a rail, but the left one's
+			// two annotation lines must end before the right one's symbol.
+			leftReach := pin.X - c.BBox.MinX
+			gap = math.Max(gap, plCeil(plPowerCapRightReach(*previousCap)+bslPartGap+leftReach))
+		}
 		c = plTranslate(c, previous.X+gap-pin.X, p4.Y-pin.Y)
 		next := plPin(c, "1")
 		plan.Placements = append(plan.Placements, c)
 		plan.Wires = append(plan.Wires, powerLayoutWire{Net: outNet, Points: [][2]float64{{previous.X, p4.Y}, {next.X, p4.Y}}})
 		previous = next
+		placedCap := c
+		previousCap = &placedCap
 	}
 	plan.Flags = append(plan.Flags, powerLayoutFlag{inNet, "power", plPin(input, "1").X, p3.Y, "up", schStubLen}, powerLayoutFlag{outNet, "power", previous.X, previous.Y, "up", schStubLen}, powerLayoutFlag{outNet, "power", p2.X, p2.Y, "left", 4 * schAnchorGrid})
 	// Ground pin exits left before turning down; the calibrated ordering puts
@@ -367,6 +386,14 @@ func planPowerLayout(raw []byte, o powerLayoutOptions) (*powerLayoutPlan, error)
 		return nil, err
 	}
 	return plan, nil
+}
+
+// Reuse the project's calibrated 6 units/character + 8 units text padding,
+// excluding the netport body. Pin-to-body distance is measured independently.
+func plPowerTextWidth(text string) float64 { return acPortTotalLen(text) - acPortBodyLen }
+func plPowerCapRightReach(c powerLayoutPlacement) float64 {
+	textWidth := math.Max(plPowerTextWidth(c.Designator), plPowerTextWidth(c.Value))
+	return c.BBox.MaxX - plPin(c, "1").X + 2*schAnchorGrid + textWidth
 }
 
 func plTranslate(c powerLayoutPlacement, dx, dy float64) powerLayoutPlacement {

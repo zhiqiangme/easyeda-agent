@@ -203,8 +203,12 @@ easyeda sch power-layout --from geometry.json --doc <page-uuid> \
 easyeda sch apply power-apply.json --yes
 ```
 
-`--from` 是 `sch list --include-bbox --include-pins` 的完整 JSON；普通 `sch read`
-不含几何，不能替代。若清线/校准后引脚暂时浮空，只能将清线前已审核的 pin→net 黄金表
+`--from` 是 `schematic.components.list` 的完整 JSON，请求时带
+`includeBBox/includePins/includeWires/includeConnectivitySummary=true`；普通 `sch read`
+不含几何，不能替代。生成 Apply 还要求每条旧线有 `primitiveId` 或 `wirePrimitiveId`。
+连接器 1.4.1 的 `includeWires` 只返回线段坐标：本次实测用官方
+`sch_PrimitiveWire.getAll()` 的只读结果补充 ID；缺少 ID 或导线清单时生成器会拒绝，
+不会把缺失数据当成空页面。若清线/校准后引脚暂时浮空，只能将清线前已审核的 pin→net 黄金表
 合回测量数据，并注明 desired 网表来源。计划拒绝缺 bbox/pin/朝向、非 5 网格、非四器件
 页面、错网、缺图纸、过件导线和异网相交。当前要求核心已测得 VIN 左、VOUT4 右、GND 在
 左下；宏恩实例实测 `mirror=true, rotation=180` 达到该方向，其他符号必须重新校准。
@@ -212,7 +216,14 @@ easyeda sch apply power-apply.json --yes
 
 Apply 前验证源文档和几何仍一致，先移除旧线/标记，再移动器件，回读每个 pin 的期望
 坐标通过后才画线；最后检查 pin→net、`sch check`、`bridge-check`、DRC 并保存。
-离线算法验证本体与导线，文字和电源符号的实际渲染范围仍须现场检查。
+间距同时包含电容右侧位号/Value 文字列、电源网名宽度与 `clusters` 的 20 单位净距；
+数值/网名变长时自动增加间距，不用固定 XY 或只看不含文字的器件 bbox。
+离线算法验证本体与导线，并按共享字宽模型预留标注；文字和电源符号的实际渲染范围
+仍须现场检查。
+
+Apply 的导线不逐段写 `net` 名称，由所在连续线树的局部电源/GND 符号命名；
+否则平台合并两段同名线时会报“多个网络名 +3V3、+3V3”。计划中的网名和最终
+逐 pin 校验仍保留。实测验收与限制见 `docs/power-layout-validation.md`。
 
 Template `--apply` is deliberately **pre-wiring only**. It moves symbols via
 `schematic.component.modify`, which does not carry attached wires or flags with

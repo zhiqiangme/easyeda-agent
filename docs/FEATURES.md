@@ -5,6 +5,7 @@
 ## 当前基线
 
 - 原理图：以 Connectivity IR（器件、引脚、网络、pin-to-net）为电气事实，布局与 Lib 模块复用不得改变连接核心。
+- 固定 LDO 样例：`sch power-layout` 根据实测 pin/bbox 离线计算四器件位置、直连导线及 `sch apply` 队列；`expectSchematic` 校验移动前后几何与完整引脚网表。[验收及范围](power-layout-validation.md)。
 - PCB：`layout-lint` 负责硬门，`layout-score` 负责质量维度；`pcb check` 与 DRC 负责制造和电气约束。
 - 94 个 typed actions 的精确清单始终以 `make actions` 为准，本文不重复维护易过时的数量和版本历史。
 - 真实回归输入、验收门和运行步骤见 [`e2e-automation-acceptance.md`](e2e-automation-acceptance.md)。
