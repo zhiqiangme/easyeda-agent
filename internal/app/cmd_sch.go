@@ -1966,9 +1966,6 @@ the selection). Without --ids it exports the whole active page.`,
 	sch.AddCommand(newSchStatusCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchNetsCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchPowerLayoutCmd(stdout, stderr))
-	// Keep the existing ordered runner under the schematic domain as well.
-	// This is the same fail-fast journaled Apply engine, not a second executor.
-	sch.AddCommand(newApplyCmd(cfg, stdout, stderr))
 
 	return sch
 }
