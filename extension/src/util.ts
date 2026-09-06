@@ -587,6 +587,16 @@ export function footprintNameEquals(a: unknown, b: unknown): boolean {
 	return left.toLowerCase() === right.toLowerCase();
 }
 
+/** Normalize current SDK footprint refs and legacy flattened device records. */
+export function readDeviceFootprint(device: Record<string, unknown>): { uuid: string; libraryUuid: string; name: string } {
+	const nested = device.footprint;
+	const ref = nested && typeof nested === 'object' && !Array.isArray(nested)
+		? nested as Record<string, unknown>
+		: { uuid: device.footprintUuid, libraryUuid: device.footprintLibraryUuid, name: device.footprintName };
+	const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+	return { uuid: text(ref.uuid), libraryUuid: text(ref.libraryUuid), name: text(ref.name) };
+}
+
 /**
  * Does a library candidate carry the SAME footprint asset as the placed
  * instance? Uuid beats name: when both sides expose a footprint uuid that
@@ -595,15 +605,16 @@ export function footprintNameEquals(a: unknown, b: unknown): boolean {
  * missing on either side do we fall back to {@link footprintNameEquals}.
  *
  * @param instanceFootprint - the instance's `getState_Footprint()` ref
- * @param candidate - a `lib_Device` search hit (`footprintName`/`footprintUuid`)
+ * @param candidate - a `lib_Device` search hit (nested or legacy footprint ref)
  * @returns true when the candidate carries the instance's footprint
  */
 export function footprintMatchesInstance(
-	instanceFootprint: { uuid?: unknown; name?: unknown } | undefined,
+	instanceFootprint: { uuid?: unknown; libraryUuid?: unknown; name?: unknown } | undefined,
 	candidate: Record<string, unknown>,
 ): boolean {
-	const instUuid = typeof instanceFootprint?.uuid === 'string' ? instanceFootprint.uuid.trim() : '';
-	const candUuid = typeof candidate.footprintUuid === 'string' ? (candidate.footprintUuid as string).trim() : '';
-	if (instUuid !== '' && candUuid !== '') return instUuid === candUuid;
-	return footprintNameEquals(instanceFootprint?.name, candidate.footprintName);
+	const instance = readDeviceFootprint({ footprint: instanceFootprint });
+	const target = readDeviceFootprint(candidate);
+	if (instance.libraryUuid && target.libraryUuid && instance.libraryUuid !== target.libraryUuid) return false;
+	if (instance.uuid && target.uuid) return instance.uuid === target.uuid;
+	return footprintNameEquals(instance.name, target.name);
 }

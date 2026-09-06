@@ -369,3 +369,12 @@ test('footprintMatchesInstance: no usable identity on either side is not a match
 	assert.equal(footprintMatchesInstance(undefined, { footprintName: 'R0603' }), false);
 	assert.equal(footprintMatchesInstance({ name: 'r0603' }, {}), false);
 });
+
+test('footprintMatchesInstance: nested SDK refs retain UUID and library identity', () => {
+	const instance = { uuid: 'FP-1', libraryUuid: 'LIB-A', name: ' r0603 ' };
+	assert.equal(footprintMatchesInstance(instance, { footprint: { uuid: 'FP-1', libraryUuid: 'LIB-A', name: 'renamed' } }), true);
+	assert.equal(footprintMatchesInstance(instance, { footprint: { uuid: 'FP-2', libraryUuid: 'LIB-A', name: 'R0603' } }), false);
+	assert.equal(footprintMatchesInstance(instance, { footprint: { uuid: 'FP-1', libraryUuid: 'LIB-B', name: 'R0603' } }), false);
+	assert.equal(footprintMatchesInstance(instance, { footprintUuid: 'FP-1', footprintLibraryUuid: 'LIB-B', footprintName: 'R0603' }), false);
+	assert.equal(footprintMatchesInstance({ name: ' r0603 ' }, { footprint: { name: ' R0603 ' } }), true);
+});

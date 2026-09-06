@@ -43,6 +43,12 @@ easyeda sch sheet-geometry --project <project> --doc <page-uuid> --json
 从官方器件记录的 Datasheet 地址查典型应用、引脚和外围参数，不凭外观或记忆补接线。
 新选型可用 [parts-add.py](../scripts/parts-add.py) 写回标准器件库。
 
+`sch resolve-lcsc` 与换件前的旧器件解析使用同一封装身份规则：双方有封装 UUID 时精确
+匹配，双方同时提供封装库 UUID 时也须一致；缺失 UUID 才按去首尾空白、忽略大小写的
+封装名称回退。只有 UUID、没有名称的实例仍要过滤封装。兼容库记录的嵌套 `footprint`
+及旧版 `footprintName/footprintUuid` 字段。批量解析仅对完整查询条件相同的实例复用结果，
+包括型号、项目库器件名、封装 UUID/库 UUID/名称，不能因型号与封装同名就跨身份复用。
+
 `sch block-apply` 仍适用于已验证的电路块，支持相对关系模板和存量绝对偏移模板；它会读取
 真实引脚、验证几何和连通，并登记功能子组。模板的功能引脚名必须与实际符号引脚表对应。
 `compose` 消费已经设计好的 Lib 几何，不能代替任意器件的典型电路设计。

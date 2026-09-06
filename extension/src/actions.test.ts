@@ -2361,3 +2361,117 @@ test('resolve_lcsc: a REAL package-variant mismatch is still refused', async () 
 	}
 	finally { delete (globalThis as any).eda; }
 });
+
+test('resolve_lcsc: a footprint UUID without a name still selects the matching variant', async () => {
+	(globalThis as any).eda = resolveLcscEda({ uuid: 'FP-R0603' });
+	try {
+		const res: any = await runAction('schematic.component.resolve_lcsc', {});
+		assert.equal(res.result.unresolvedCount, 0);
+		assert.equal(res.result.items[0].lcsc, 'C98220');
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
+test('resolve_lcsc: a lone wrong UUID is refused before apply even when the instance name is missing', async () => {
+	const mock = resolveLcscEda({ uuid: 'FP-MISSING' });
+	const hits = await mock.lib_Device.search();
+	mock.lib_Device.search = async () => hits.slice(0, 1);
+	let writes = 0;
+	mock.sch_PrimitiveComponent.modify = async () => { writes++; return true; };
+	(globalThis as any).eda = mock;
+	try {
+		const res: any = await runAction('schematic.component.resolve_lcsc', { apply: true });
+		assert.equal(res.result.unresolvedCount, 1);
+		assert.match(res.result.unresolved[0].reason, /FP-MISSING.*package-variant mismatch/);
+		assert.equal(writes, 0);
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
+test('resolve_lcsc: current SDK nested names use the same trimmed case-insensitive fallback', async () => {
+	const mock = resolveLcscEda({ name: ' r0603 ' });
+	const hits = await mock.lib_Device.search();
+	mock.lib_Device.search = async () => hits.map(({ footprintName, footprintUuid, ...hit }: any) => ({
+		...hit, footprint: { name: footprintName, uuid: footprintUuid, libraryUuid: 'LIB-F' },
+	}));
+	(globalThis as any).eda = mock;
+	try {
+		const res: any = await runAction('schematic.component.resolve_lcsc', {});
+		assert.equal(res.result.unresolvedCount, 0);
+		assert.equal(res.result.items[0].lcsc, 'C98220');
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
+test('resolve_lcsc: batch cache keeps same-named footprint UUIDs and libraries separate when applying', async () => {
+	const footprints = [
+		{ name: 'r0603', uuid: 'FP-A', libraryUuid: 'LIB-A' },
+		{ name: 'r0603', uuid: 'FP-B', libraryUuid: 'LIB-A' },
+		{ name: 'r0603', uuid: 'FP-B', libraryUuid: 'LIB-B' },
+	];
+	const parts = [...footprints, footprints[0]].map((footprint, i) => mockComponent({
+		PrimitiveId: `p-${i}`, ComponentType: 'part', Designator: `R${i + 1}`,
+		Name: 'SHARED-MPN', ManufacturerId: 'SHARED-MPN', SupplierId: '', Footprint: footprint,
+	}));
+	const writes: unknown[] = [];
+	let searches = 0;
+	(globalThis as any).eda = {
+		sch_PrimitiveComponent: {
+			getAll: async () => parts,
+			modify: async (id: string, changes: unknown) => { writes.push([id, changes]); return true; },
+		},
+		lib_Device: {
+			search: async () => {
+				searches++;
+				return footprints.map((footprint, i) => ({
+					uuid: `DEV-${i}`, libraryUuid: 'DEVICE-LIB', manufacturerId: 'SHARED-MPN',
+					supplierId: `C${i + 1}`, footprint,
+				}));
+			},
+		},
+	};
+	try {
+		const res: any = await runAction('schematic.component.resolve_lcsc', { apply: true });
+		assert.equal(res.result.unresolvedCount, 0);
+		assert.equal(res.result.appliedCount, 4);
+		assert.deepEqual(writes, [
+			['p-0', { supplierId: 'C1' }], ['p-1', { supplierId: 'C2' }],
+			['p-2', { supplierId: 'C3' }], ['p-3', { supplierId: 'C1' }],
+		]);
+		assert.equal(searches, 3, 'only the fourth identical identity may reuse the first resolution');
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
+test('resolve_lcsc: batch cache retains distinct project-name fallbacks for the same MPN and footprint', async () => {
+	const names = ['IMPORTED-A', 'IMPORTED-B', 'IMPORTED-A'];
+	const parts = names.map((name, i) => mockComponent({
+		PrimitiveId: `p-${i}`, ComponentType: 'part', Designator: `U${i + 1}`,
+		Name: name, ManufacturerId: 'UNSEARCHABLE-MPN', SupplierId: '', Footprint: { name: 'SOT23' },
+	}));
+	const searches: unknown[] = [];
+	(globalThis as any).eda = {
+		sch_PrimitiveComponent: { getAll: async () => parts },
+		lib_Device: {
+			search: async (query: string, scope?: string) => {
+				searches.push([query, scope]);
+				return scope === 'project' ? [{
+					uuid: `DEV-${query}`, libraryUuid: 'PROJECT-LIB', name: query,
+					supplierId: query === 'IMPORTED-A' ? 'C10' : 'C20', footprintName: 'SOT23',
+				}] : [];
+			},
+		},
+	};
+	try {
+		const res: any = await runAction('schematic.component.resolve_lcsc', {});
+		assert.equal(res.result.unresolvedCount, 0);
+		assert.deepEqual(res.result.items.map((item: any) => [item.lcsc, item.via]), [
+			['C10', 'project-name'], ['C20', 'project-name'], ['C10', 'project-name'],
+		]);
+		assert.deepEqual(searches, [
+			['UNSEARCHABLE-MPN', undefined], ['IMPORTED-A', 'project'],
+			['UNSEARCHABLE-MPN', undefined], ['IMPORTED-B', 'project'],
+		]);
+	}
+	finally { delete (globalThis as any).eda; }
+});

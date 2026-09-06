@@ -31,6 +31,7 @@ import {
 	optionalNumber,
 	optionalString,
 	pickNamedCandidate,
+	readDeviceFootprint,
 	requireNumber,
 	requireString,
 	requireStringArray,
@@ -5480,7 +5481,7 @@ interface DeviceResolution {
 const asCandidate = (r: Record<string, unknown>): LcscCandidate => ({
 	name: String(r.name ?? ''),
 	lcsc: String(r.supplierId ?? ''),
-	footprintName: String(r.footprintName ?? ''),
+	footprintName: readDeviceFootprint(r).name,
 	uuid: String(r.uuid ?? ''),
 });
 
@@ -5502,25 +5503,24 @@ const asCandidate = (r: Record<string, unknown>): LcscCandidate => ({
  * T-16: `sch replace` refused, since it resolves the OLD device through here).
  */
 async function resolvePlacedDevice(snapshot: Record<string, unknown>): Promise<DeviceResolution> {
-	const instanceFp = snapshot.footprint as { uuid?: unknown; name?: unknown } | undefined;
-	const rawFpName = typeof instanceFp?.name === 'string' ? instanceFp.name : '';
-	const fpName = rawFpName.trim();
+	const instanceFp = readDeviceFootprint(snapshot);
+	const fpIdentity = instanceFp.name || instanceFp.uuid || instanceFp.libraryUuid;
 	const finish = (hits: Array<Record<string, unknown>>, via: string): DeviceResolution | undefined => {
 		let pool = hits.filter(r => typeof r.uuid === 'string' && typeof r.libraryUuid === 'string');
 		const before = pool;
-		if (fpName) pool = pool.filter(r => footprintMatchesInstance(instanceFp, r));
+		if (fpIdentity) pool = pool.filter(r => footprintMatchesInstance(instanceFp, r));
 		if (pool.length === 1) {
 			const hit = pool[0];
 			return {
 				device: { uuid: hit.uuid as string, libraryUuid: hit.libraryUuid as string, via },
 				lcsc: /^C\d+$/.test(String(hit.supplierId ?? '')) ? String(hit.supplierId) : undefined,
-				deviceFootprint: String(hit.footprintName ?? ''),
+				deviceFootprint: readDeviceFootprint(hit).name,
 			};
 		}
 		if (before.length > 0) {
 			return {
 				reason: pool.length === 0
-					? `matched ${before.length} device(s) by ${via} but NONE carries the instance footprint "${fpName}" (package-variant mismatch; names compared case-insensitively)`
+					? `matched ${before.length} device(s) by ${via} but NONE carries the instance footprint "${fpIdentity}" (package-variant mismatch; names compared case-insensitively)`
 					: `${pool.length} devices match by ${via} + footprint — ambiguous`,
 				candidates: before.slice(0, 5).map(asCandidate),
 			};
@@ -5599,8 +5599,8 @@ const schematicComponentResolveLcsc: Handler = async (payload) => {
 		throw new ActionError(ErrorCodes.INVALID_STATE, `No part with primitiveId "${onlyId}" on the active page.`);
 	}
 
-	// Same MPN ⇒ same resolution: cache per manufacturerId+footprint so a
-	// 166-part board does tens, not hundreds, of online searches.
+	// Reuse only identical resolver inputs, including the project-name fallback
+	// and footprint asset identity; same-named package variants are not aliases.
 	const cache = new Map<string, DeviceResolution>();
 	const items: Array<Record<string, unknown>> = [];
 	const unresolved: Array<Record<string, unknown>> = [];
@@ -5610,13 +5610,17 @@ const schematicComponentResolveLcsc: Handler = async (payload) => {
 		const snapshot = serializeComponent(comp);
 		const designator = String(snapshot.designator ?? '');
 		const current = typeof snapshot.supplierId === 'string' ? snapshot.supplierId : '';
-		const fp = (snapshot.footprint as Record<string, unknown> | undefined)?.name ?? '';
+		const footprint = readDeviceFootprint(snapshot);
+		const fp = footprint.name;
 		if (/^C\d+$/.test(current)) {
 			items.push({ designator, lcsc: current, via: 'instance', footprint: fp });
 			continue;
 		}
 		const mpn = typeof snapshot.manufacturerId === 'string' ? snapshot.manufacturerId : '';
-		const cacheKey = `${mpn}|${fp}`;
+		const cacheKey = JSON.stringify([
+			current, mpn, typeof snapshot.name === 'string' ? snapshot.name : '',
+			footprint.uuid, footprint.libraryUuid, footprint.name.toLowerCase(),
+		]);
 		let res = cache.get(cacheKey);
 		if (!res) {
 			res = await resolvePlacedDevice(snapshot);
