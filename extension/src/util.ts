@@ -559,3 +559,51 @@ function describeThrownRaw(err: unknown): string {
 	// explicitly rather than emitting a bare, indistinguishable "[object X]".
 	return `${Object.prototype.toString.call(err)} (no enumerable properties)`;
 }
+
+/**
+ * The one place footprint NAMES are compared (issues T-3 / T-16).
+ *
+ * EasyEDA Pro reports the SAME footprint asset with different casing depending
+ * on where you read it: a placed instance's `getState_Footprint().name` comes
+ * back lower-cased (`r0603`, `olga-16_l3.7-w2.6-p0.50-tl_as7331-aqfm`) while
+ * the device-library record carries the authored name (`R0603`,
+ * `OLGA-16_…-AQFM`). A case-SENSITIVE `===` therefore declares every part a
+ * package-variant mismatch — live: 26/26 parts unresolved by `sch resolve-lcsc`
+ * and `sch replace` refused with `INVALID_STATE — package-variant mismatch`.
+ *
+ * Footprint names are asset identifiers, not free text, so trimming plus
+ * case-folding is safe: genuinely different packages (`R0603` vs `R0805`) still
+ * compare unequal, which is the semantics the mismatch check needs.
+ *
+ * @param a - one footprint name (any casing / surrounding whitespace)
+ * @param b - the other footprint name
+ * @returns true when both name the same footprint asset
+ */
+export function footprintNameEquals(a: unknown, b: unknown): boolean {
+	if (typeof a !== 'string' || typeof b !== 'string') return false;
+	const left = a.trim();
+	const right = b.trim();
+	if (left === '' || right === '') return false;
+	return left.toLowerCase() === right.toLowerCase();
+}
+
+/**
+ * Does a library candidate carry the SAME footprint asset as the placed
+ * instance? Uuid beats name: when both sides expose a footprint uuid that
+ * comparison is authoritative (a renamed-but-identical asset still matches, and
+ * two same-named assets in different libraries do not). Only when a uuid is
+ * missing on either side do we fall back to {@link footprintNameEquals}.
+ *
+ * @param instanceFootprint - the instance's `getState_Footprint()` ref
+ * @param candidate - a `lib_Device` search hit (`footprintName`/`footprintUuid`)
+ * @returns true when the candidate carries the instance's footprint
+ */
+export function footprintMatchesInstance(
+	instanceFootprint: { uuid?: unknown; name?: unknown } | undefined,
+	candidate: Record<string, unknown>,
+): boolean {
+	const instUuid = typeof instanceFootprint?.uuid === 'string' ? instanceFootprint.uuid.trim() : '';
+	const candUuid = typeof candidate.footprintUuid === 'string' ? (candidate.footprintUuid as string).trim() : '';
+	if (instUuid !== '' && candUuid !== '') return instUuid === candUuid;
+	return footprintNameEquals(instanceFootprint?.name, candidate.footprintName);
+}

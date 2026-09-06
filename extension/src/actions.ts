@@ -21,6 +21,7 @@ import {
 	classifyWireConnectivity,
 	describeThrown,
 	filterExactLcsc,
+	footprintMatchesInstance,
 	isLcscQuery,
 	newArtifactId,
 	type NamedLibItem,
@@ -5489,17 +5490,25 @@ const asCandidate = (r: Record<string, unknown>): LcscCandidate => ({
  * returns fragment-matched garbage — a ferrite bead ranked first — and a
  * take-r[0] caller silently swaps an antenna socket for C1017). Match rules:
  * exact-field equality only (manufacturerId / name), and when the instance
- * knows its footprint the match's footprintName MUST equal it — a lone hit
- * with a DIFFERENT footprint is a package-variant mismatch (SMBJ33A LS5.4 vs
- * LS5.3 family), reported as unresolved WITH candidates instead of picked.
+ * knows its footprint the match MUST carry the same footprint asset — a lone
+ * hit with a DIFFERENT footprint is a package-variant mismatch (SMBJ33A LS5.4
+ * vs LS5.3 family), reported as unresolved WITH candidates instead of picked.
+ *
+ * "Same footprint asset" is decided by footprintMatchesInstance: footprint uuid
+ * when both sides have one, otherwise a trimmed case-INSENSITIVE name compare.
+ * The platform lower-cases an instance's footprint name (`r0603`) while the
+ * library keeps the authored one (`R0603`), so a `===` compare mis-reported the
+ * whole board as package-variant mismatches (T-3: 26/26 parts unresolved;
+ * T-16: `sch replace` refused, since it resolves the OLD device through here).
  */
 async function resolvePlacedDevice(snapshot: Record<string, unknown>): Promise<DeviceResolution> {
-	const instanceFp = (snapshot.footprint as Record<string, unknown> | undefined)?.name;
-	const fpName = typeof instanceFp === 'string' ? instanceFp : '';
+	const instanceFp = snapshot.footprint as { uuid?: unknown; name?: unknown } | undefined;
+	const rawFpName = typeof instanceFp?.name === 'string' ? instanceFp.name : '';
+	const fpName = rawFpName.trim();
 	const finish = (hits: Array<Record<string, unknown>>, via: string): DeviceResolution | undefined => {
 		let pool = hits.filter(r => typeof r.uuid === 'string' && typeof r.libraryUuid === 'string');
 		const before = pool;
-		if (fpName) pool = pool.filter(r => r.footprintName === fpName);
+		if (fpName) pool = pool.filter(r => footprintMatchesInstance(instanceFp, r));
 		if (pool.length === 1) {
 			const hit = pool[0];
 			return {
@@ -5511,7 +5520,7 @@ async function resolvePlacedDevice(snapshot: Record<string, unknown>): Promise<D
 		if (before.length > 0) {
 			return {
 				reason: pool.length === 0
-					? `matched ${before.length} device(s) by ${via} but NONE carries the instance footprint "${fpName}" (package-variant mismatch)`
+					? `matched ${before.length} device(s) by ${via} but NONE carries the instance footprint "${fpName}" (package-variant mismatch; names compared case-insensitively)`
 					: `${pool.length} devices match by ${via} + footprint — ambiguous`,
 				candidates: before.slice(0, 5).map(asCandidate),
 			};

@@ -2304,3 +2304,60 @@ test('titleblock: 始终不生效的项在轮询后仍如实报失败 (#186)', a
 	);
 	delete (globalThis as any).eda;
 });
+
+// ─── resolve_lcsc footprint matching (T-3 / T-16) ─────────────────────────
+
+/** Build the eda mock resolve_lcsc needs: one part + a two-variant MPN hit. */
+function resolveLcscEda(instanceFootprint: Record<string, unknown>): any {
+	const part = mockComponent({
+		PrimitiveId: 'p-r8',
+		ComponentType: 'part',
+		Designator: 'R8',
+		Name: 'RC0603FR-0710KL',
+		ManufacturerId: 'RC0603FR-0710KL',
+		Supplier: '',
+		SupplierId: '',
+		Footprint: instanceFootprint,
+	});
+	return {
+		sch_PrimitiveComponent: { getAll: async () => [part] },
+		lib_Device: {
+			getByLcscIds: async () => [],
+			search: async () => [
+				{ uuid: 'DEV-0603', libraryUuid: 'LIB-1', name: 'RC0603FR-0710KL', manufacturerId: 'RC0603FR-0710KL', supplierId: 'C98220', footprintName: 'R0603', footprintUuid: 'FP-R0603' },
+				{ uuid: 'DEV-0805', libraryUuid: 'LIB-1', name: 'RC0805FR-0710KL', manufacturerId: 'RC0603FR-0710KL', supplierId: 'C17414', footprintName: 'R0805', footprintUuid: 'FP-R0805' },
+			],
+		},
+	};
+}
+
+test('resolve_lcsc: a lower-cased instance footprint matches the library record (T-3)', async () => {
+	(globalThis as any).eda = resolveLcscEda({ libraryUuid: 'LIB-F', uuid: '', name: 'r0603' });
+	try {
+		const res: any = await runAction('schematic.component.resolve_lcsc', {});
+		assert.equal(res.result.unresolvedCount, 0);
+		assert.equal(res.result.items[0].lcsc, 'C98220');
+		assert.equal(res.result.items[0].via, 'mpn');
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
+test('resolve_lcsc: a matching footprint uuid outranks a differently-named library record', async () => {
+	(globalThis as any).eda = resolveLcscEda({ libraryUuid: 'LIB-F', uuid: 'FP-R0603', name: 'resistor-0603-local' });
+	try {
+		const res: any = await runAction('schematic.component.resolve_lcsc', {});
+		assert.equal(res.result.unresolvedCount, 0);
+		assert.equal(res.result.items[0].lcsc, 'C98220');
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
+test('resolve_lcsc: a REAL package-variant mismatch is still refused', async () => {
+	(globalThis as any).eda = resolveLcscEda({ libraryUuid: 'LIB-F', uuid: '', name: 'r1206' });
+	try {
+		const res: any = await runAction('schematic.component.resolve_lcsc', {});
+		assert.equal(res.result.unresolvedCount, 1);
+		assert.match(String(res.result.unresolved[0].reason), /package-variant mismatch/);
+	}
+	finally { delete (globalThis as any).eda; }
+});
