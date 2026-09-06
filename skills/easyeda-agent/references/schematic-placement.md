@@ -181,17 +181,38 @@ easyeda sch autolayout --engine official --apply
 
 1. 选模块核心（LDO/DC-DC）为锚点，沿电流方向建立单轴：`VIN → 核心 → VOUT`。
    输入端子和 `C_IN` 放在核心左侧，`C_OUT/C_BYP` 放在右侧；同一输出网络的多个
-   电容按近端距离从上到下排列，避免交叉。
+   电容竖直放置，在水平 VOUT 线上横向并列，pin1 在上、GND pin2 在下。
 2. 对每个器件枚举 4 个朝向，代价函数依次考虑：引脚到目标的曼哈顿距离、方向反转、
    线段数量、折点数量、穿越其它 pin、与文字/图签重叠。固定优先级是电气拓扑、
    无交叉、方向一致、少线、短线、版面紧凑。
-3. 电源 pin 的外引方向固定为 up，GND 固定为 down；普通外围件的 pin1→目标网络
-   方向与主轴一致。若两个候选同分，用左上到右下的 Z 顺序稳定打破平局。
+3. 电源符号优先向上，GND 向下；外围电容作为电源到地的竖直支路。重复 VOUT pin
+   若位于核心输入侧，可使用短的向左电源符号，避免为了统一方向穿越 VIN 线。
+   若两个候选同分，用左上到右下的 Z 顺序稳定打破平局。
 4. 位置确定后，对每个 net 生成正交最小森林；局部 VOUT→电容必须是真实 wire，
    全局 GND/VCC 才允许在各 terminal 使用就近符号。任何线树合并多个网络立即拒绝。
 
 因此，布局算法的输入是器件/引脚/网络数据，输出是可复现的 XY、rotation、wire
 points 和 flag direction；历史导线和截图都不参与规划。
+
+固定 AMS1117 的四器件 MVP 已有离线入口（不会调用编辑器）：
+
+```bash
+easyeda sch power-layout --from geometry.json --doc <page-uuid> \
+  --core U1 --input-cap C2 --output-caps C1,C3 --at 300,650 \
+  --out power-plan.json --playbook power-apply.json
+easyeda sch apply power-apply.json --yes
+```
+
+`--from` 是 `sch list --include-bbox --include-pins` 的完整 JSON；普通 `sch read`
+不含几何，不能替代。若清线/校准后引脚暂时浮空，只能将清线前已审核的 pin→net 黄金表
+合回测量数据，并注明 desired 网表来源。计划拒绝缺 bbox/pin/朝向、非 5 网格、非四器件
+页面、错网、缺图纸、过件导线和异网相交。当前要求核心已测得 VIN 左、VOUT4 右、GND 在
+左下；宏恩实例实测 `mirror=true, rotation=180` 达到该方向，其他符号必须重新校准。
+电容从当前真实 pin 坐标枚举旋转，不能把“270 度”当成所有库符号的通用真值。
+
+Apply 前验证源文档和几何仍一致，先移除旧线/标记，再移动器件，回读每个 pin 的期望
+坐标通过后才画线；最后检查 pin→net、`sch check`、`bridge-check`、DRC 并保存。
+离线算法验证本体与导线，文字和电源符号的实际渲染范围仍须现场检查。
 
 Template `--apply` is deliberately **pre-wiring only**. It moves symbols via
 `schematic.component.modify`, which does not carry attached wires or flags with
