@@ -16,13 +16,18 @@
 
 ![easyeda-agent workflow](docs/assets/easyeda-agent-workflow.svg)
 
+> **Current development candidate: v1.4.2.** Schematic work starts from component,
+> pin, and connectivity data: design each Lib circuit and its geometry locally,
+> compose one sheet with `sch compose`, then execute and verify with `sch apply`.
+> See [1.4 release preparation](docs/release-1.4.md) for release status and validation limits.
+
 `easyeda-agent` turns the official EasyEDA extension API into a typed, observable, Skill-friendly system. The EasyEDA plugin stays thin: it connects to the local agent and executes approved actions. The Go CLI/daemon owns protocol, state, artifacts, validation, and user-facing workflows.
 
 ## Why This Exists
 
 The upstream `run-api-gateway` proves the important entry point: code can run inside EasyEDA with access to the official `eda` object. Its rough edge is that it exposes raw JavaScript execution as the main workflow. That is powerful, but brittle for agents.
 
-The connector is real and working: the daemon binds a **single fixed port `60832` (`0xEDA0` — "EDA" in hex; moved off 49620 in 0.15.0 to stop clashing with the official gateway range)** (it never spills to the next; a stale easyeda daemon already holding it is taken over automatically), the connector locks onto it, validates a handshake, self-heals its connection, and dispatches a typed action catalog to the official `eda.*` API. Raw JS survives only as the confirmation-gated `debug.exec_js` escape hatch. See [docs/FEATURES.md](docs/FEATURES.md) for the full feature/roadmap inventory.
+The connector is real and working: the daemon defaults to a **single fixed port `60832`** (it never spills to the next; a stale easyeda daemon already holding it is taken over automatically), the connector locks onto it, validates a handshake, reconnects, and dispatches typed actions to the official `eda.*` API. `debug.exec_js` remains available for temporary debugging within the task's scope. See [docs/FEATURES.md](docs/FEATURES.md) for the feature/roadmap inventory.
 
 This project moves the system into a better shape:
 
@@ -58,7 +63,8 @@ On top of those three, easyeda-agent adds the engineering middle layer: a self-h
 | Domain | What it does |
 |---|---|
 | **Circuit-block library (flagship)** | Community-built, credited library of **proven peripheral subcircuits** (CH340 USB-serial, ESP32 auto-download, button de-bounce, USB-hub, buck…). **Copy the topology, only rebind boundary nets** to reuse |
-| Schematic | Library-first placement (real LCSC/JLC parts), grouping, wiring, netflags, `sch check`/`layout-lint` real-bbox validation |
+| Schematic | Canonical connectivity → Lib geometry → `sch compose` on one sheet in equal-height Z-order rows → `sch apply`; normal designators stay separate from functional Role; pink dashed frames and 0.2 inch titles fit into available space above or below the circuit |
+| Validation | Local data checks, Apply readback of pins/nets/NC/geometry, and the four-stage `sch gate --strict`: layout-lint → check → bridge-check → drc |
 | PCB | Auto-layout, board outline, keep-outs, rule-aware short-route, 4-layer power planes, copper pour, silkscreen avoidance, DRC/`pcb check` |
 | Design flow | Gated spine from a **customer-voice requirement** to a finished board (S0–S6 + P0–P10), milestone confirmation, save checkpoints |
 | Artifacts | BOM (LCSC C-number enrichment), netlist, export, native screenshots, audit log, record→replay |
@@ -77,8 +83,8 @@ parts point back into the standard-parts library (BOM-ready).
 - **Three dimensions** — parts (with alternatives) + schematic-wiring notes + PCB layout electrical constraints, all in one block;
 - **AI-consumable** — the agent checks the library before hand-wiring a peripheral; on a hit it copies, skipping a whole module's selection + wiring.
 
-> Library dir [`references/blocks/`](skills/easyeda-agent/references/blocks) (one block per file) ·
-> browse with `blocks.py ls/show` · contribution guide
+> The library is embedded in the CLI: `easyeda blocks ls/show/search` works offline,
+> without a daemon or editor window. Contribution guide:
 > [`standard-blocks-contributing.md`](skills/easyeda-agent/references/standard-blocks-contributing.md)
 
 ## Install Skills
@@ -94,7 +100,7 @@ channels: import the **strictly CLI-version-locked** GitHub-Release `.eext` whos
 the installer prints, or one-click install from the
 [**official 立创EDA marketplace**](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)
 (the platform auto-updates it in place, but the listing can lag the CLI — use the
-Release `.eext` when the four-piece kit must be strictly same-version):
+Release `.eext` to align CLI, connector, and Skill versions; EasyEDA has its own application version):
 
 > **ℹ️ Rename notice (2026-08)**: at the marketplace admins' request the extension's
 > **display name** changed to **"EDA Agent Connector"** (no "easyeda" in it). Per the
@@ -103,7 +109,7 @@ Release `.eext` when the four-piece kit must be strictly same-version):
 > installs is unaffected, no action needed.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
 ```
 
 The one-line script installs/updates the `easyeda` CLI/daemon, auto-detects
@@ -113,10 +119,10 @@ Codex (`~/.codex/skills/easyeda-agent`) and Claude Code
 Control skill install with env vars:
 
 ```bash
-EASYEDA_INSTALL_SKILLS=codex,claude curl -fsSL .../install.sh | sh  # force targets
-EASYEDA_INSTALL_SKILLS=none          curl -fsSL .../install.sh | sh  # skip skills
-EASYEDA_SKILL_PRESERVE=1             curl -fsSL .../install.sh | sh  # keep local edits
-EASYEDA_VERSION=v0.18.2              curl -fsSL .../install.sh | sh  # pin a release (skips the API)
+curl -fsSL .../install.sh | EASYEDA_INSTALL_SKILLS=codex,claude bash  # force targets
+curl -fsSL .../install.sh | EASYEDA_INSTALL_SKILLS=none bash  # skip skills
+curl -fsSL .../install.sh | EASYEDA_SKILL_PRESERVE=1 bash  # keep local edits
+curl -fsSL .../install.sh | EASYEDA_VERSION='<vX.Y.Z>' bash  # pin a release (skips the API)
 ```
 
 **Hitting `403` / GitHub API rate limit?** The script calls `api.github.com` once to
@@ -128,7 +134,7 @@ message prints them too):
 export GITHUB_TOKEN=<token>   # GH_TOKEN works too
 gh auth login                 # an authenticated gh CLI is picked up automatically (5000/hour)
 
-EASYEDA_VERSION=v0.18.2 curl -fsSL .../install.sh | sh   # or pin a tag and skip the API
+curl -fsSL .../install.sh | EASYEDA_VERSION='<vX.Y.Z>' bash   # or pin a tag and skip the API
 ```
 
 Available tags: [Releases](https://github.com/zhoushoujianwork/easyeda-agent/releases).
@@ -142,11 +148,9 @@ from a registry:
 clawhub install easyeda-agent
 ```
 
-> Note: skillhub.cn is currently a web-only community without a CLI install API
-> (`/api/cli/v1` serves the web page, not an API), so `skillhub install
-> --registry https://skillhub.cn` cannot work. Use the one-line installer above,
-> or unpack `skills.tar.gz` from the GitHub Release into `~/.claude/skills/` or
-> `~/.codex/skills/`.
+> SkillHub has its own [official CLI](https://skillhub.cn), which is incompatible
+> with other tools also named `skillhub`. Use the installer above or the GitHub
+> Release `skills.tar.gz` when you need the same version as the CLI and connector.
 
 The old split skills (`easyeda-schematic`, `easyeda-pcb`, `easyeda-design-flow`,
 `easyeda-conventions`) have been merged and removed from the repository.
@@ -199,11 +203,7 @@ A few individual steps, each a real before/after on the same board:
 |---|---|
 | <img src="docs/assets/demo-outline-before.png" width="330" alt="before: oversized board outline"/> → <img src="docs/assets/demo-outline-after.png" width="330" alt="after: outline tightened to parts"/> | <img src="docs/assets/demo-silk-before.png" width="330" alt="before: scattered overlapping designators"/> → produces the aligned designators in the board above |
 
-> A short screen-capture GIF of the end-to-end run will be added here (recording
-> storyboard: [docs/demo-storyboard-esp32-mini.md](docs/demo-storyboard-esp32-mini.md)
-> — schematic → import PCB → 4-layer stackup → placement → GND inner-plane / VCC signal
-> plane → antenna keep-out + check → silkscreen/LED polarity → slot). The images above
-> are real `pcb snapshot` captures from the fixed regression board, not mockups.
+> The images above are real `pcb snapshot` captures from the fixed regression board.
 
 ## Repository Layout
 
@@ -232,13 +232,13 @@ go run ./cmd/easyeda board list --project <name>
 go run ./cmd/easyeda call system.health
 ```
 
-`daemon start` starts the local server. It binds a **single fixed port `127.0.0.1:60832`** — never spilling to the next, so at most one daemon runs and the connector always finds it there. A stale easyeda daemon already holding `49620` is taken over automatically; a foreign process makes it ask (interactive) or refuse (headless) rather than start a second daemon elsewhere. It serves three endpoints, then runs until interrupted (Ctrl-C / SIGTERM):
+`daemon start` starts the local server. It defaults to a **single fixed port `127.0.0.1:60832`** — never spilling to the next, so the connector always finds it there. A stale easyeda daemon already holding that port is taken over automatically; a foreign process makes it ask (interactive) or refuse (headless). It serves three endpoints, then runs until interrupted (Ctrl-C / SIGTERM):
 
 - `GET /health` — service identity, version, and connected windows
 - `GET /eda` — WebSocket the EasyEDA connector registers on (daemon sends a `handshake` on connect)
 - `POST /action` — a typed action envelope to forward to a connected window
 
-`daemon health` scans the configured `--ports` range (default `60832-60841`) for an `easyeda-agent` daemon — which now lives on the fixed `49620`. With the daemon running it reports `status: found` and lists connected windows; otherwise a clean `not_found` result is expected.
+`daemon health` probes for the local `easyeda-agent` daemon; the daemon and connector use port `60832` by default. With the daemon running it reports `status: found` and lists connected windows; otherwise a clean `not_found` result is expected.
 
 `call <action>` finds the running daemon and posts a typed action to it. `system.health` is answered by the daemon itself (no connector required); window-scoped actions need a connected EasyEDA window and return `NO_CONNECTOR` until the connector extension is running.
 
@@ -246,12 +246,13 @@ Both sides of the action protocol are in place and working. The Go daemon owns t
 
 ## Capabilities
 
-What the agent can drive today, via typed CLI subcommands (`easyeda <domain> <verb>`). Each is a typed action → connector → live `eda.*` call, verified on the fixed ESP32-S3 regression board.
+Capabilities are exposed through CLI subcommands (`easyeda <domain> <verb>`). Validation completed for the current candidate, and the remaining checks, are listed in [1.4 release preparation](docs/release-1.4.md).
 
 **Schematic**
 - Place real library/LCSC parts by uuid, then wire them (`sch` place/wire); power/ground **net-flags** via `connect_pin` (auto-compensates the rotation-store quirk).
-- **DRC** (`sch drc`) + reconstructed per-item **design check** (`sch check` — floating pins, wire-crossing, wire-over-pin) + geometric **layout-lint** (overlap/spacing).
-- Module-aware **auto-layout** (place → verify → adjust), one-call **`sch read`** (components + nets + floating pins + check), **BOM**/**netlist** export (BOM LCSC-enriched).
+- **Data and composition**: stable component IDs, pins, nets, and NC in the canonical graph; valid numeric designators remain unchanged, with functional names stored as Role. `sch compose` arranges already-designed Lib geometry offline, left to right from the top left, in equal-height Z-order rows on one sheet. It does not infer arbitrary peripheral circuits, paginate, or delete source pages.
+- **Frames and conversion**: `sch frame apply/check` draws and verifies pink dashed frames with 0.2 inch titles, using free space above or below the circuit. `sch apply` executes a sequential queue with precondition checks and pin/net/NC/geometry readback; a failed run requires a fresh read and plan.
+- **Validation and export**: the four-stage `sch gate --strict` runs layout-lint → check → bridge-check → drc; `sch read`, BOM/netlist export, and document SVG/PNG/PDF export provide structured evidence.
 
 **PCB — placement**
 - **`pcb new-board`** — create a **brand-new board + empty PCB page** bound to a schematic (the CLI 新建PCB / schematic-to-PCB), then `pcb import-changes` to lay it out from scratch; distinct from link-only `board.create`.

@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-"""把 skills/easyeda-agent/SKILL.md 的 metadata.version 同步到发版版本号。
+"""在发布准备阶段显式同步 Skill 的 metadata.version。
 
-为什么需要它:Agent Skills 规范允许 frontmatter 带 `metadata`(string→string),
-我们在里面记 version,让 ClawHub / 目录索引 / 离线拿到 skill 包的人都能看出这份
-skill 对应哪个 CLI。但 `make release` 只把版本传给 clawhub 命令行、并 bump
-extension.json,**不碰 SKILL.md** —— 不同步就会漂移(skill 里写着 1.0.2,实际
-发的是 1.1.0)。所以 release 在 bump 连接器的同一步里调用本脚本。
+CLI、connector 和 Skill 使用同一发布版本。先准备 connector/npm/lock 元数据、
+Changelog 和 Skill，再用 make release-check 校验；make release/release-build
+不再自动 bump、调用本脚本写版本或提交源码。
 
-CLAUDE.md 的「版本号约定」:CLI / connector / skill 始终同一个版本号。
+metadata.version 是包内声明；安装态 .version 标记由自更新器维护。
+本脚本只处理 SKILL.md，两空格缩进的 metadata.version 行保持原格式。
 
 用法:
-    python3 scripts/sync-skill-version.py 1.0.3        # 写入
-    python3 scripts/sync-skill-version.py 1.0.3 --check  # 只校验,不一致则非零退出
+    python3 scripts/sync-skill-version.py 1.4.2          # 准备时显式写入
+    python3 scripts/sync-skill-version.py 1.4.2 --check  # 只校验，不一致时非零退出
 """
 
 import argparse

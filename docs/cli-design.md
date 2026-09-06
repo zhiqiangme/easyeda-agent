@@ -42,11 +42,13 @@ easyeda <domain> <action> [flags]
 - **② → ③**：功能稳定后，包装成对应的 Cobra 子命令；Skill 描述同步更新。
 - 允许功能停留在 ② 阶段通过 `easyeda call <action>` 裸调，但 ③ 是最终形态。
 
-## 现状（截至 2026-06）
+## 1.4 当前接口
 
-| 阶段 | 状态 |
-|---|---|
-| ① `debug.exec_js` | 完整支持（逃生舱始终可用） |
-| ② Typed actions | 34 个：原理图 20 + PCB 13 + debug 1 |
-| ③ Cobra 子命令 | **尚未建立**，所有功能目前通过 `easyeda call <action>` 裸调 |
-原理图变更统一通过 `easyeda sch apply` 的有序队列执行；PCB 操作保持在 `easyeda pcb` 域。CLI → daemon → connector 是唯一运行链路，不设 Broker 层。
+原理图以 `sch connectivity/designators/compose/frame/apply` 组织数据、规划与执行，
+PCB 保持在 `pcb` 域。CLI → daemon → connector 是唯一运行链路，不设 Broker 层。
+`easyeda actions` 与各子命令 `--help` 提供当前完整清单，不在文档重复登记数量。
+
+数据转换和受保护队列的边界见
+[原理图数据与 SCH Apply](../skills/easyeda-agent/references/schematic-data.md)。
+新版本的 Skill、命令示例与实际参数必须一起核对；发布准备见
+[1.4 发布准备](release-1.4.md)。

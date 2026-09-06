@@ -56,7 +56,7 @@ BOM               13 行全带 LCSC C 号,直接可下单
 
 ```bash
 # 安装 CLI + 连接器(EasyEDA Pro 开启「允许外部交互」)
-curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
 
 # 核心命令一览
 easyeda daemon health                 # 连上了吗

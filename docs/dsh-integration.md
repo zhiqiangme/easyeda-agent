@@ -51,7 +51,7 @@ bash easyeda-agent/scripts/dsh-install.sh                  # profile 默认 web
 # DSH_HOME=/custom/.dsh bash easyeda-agent/scripts/dsh-install.sh
 ```
 
-前提：已装 `easyeda` CLI（`curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh`）、
+前提：已装 `easyeda` CLI（`curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash`）、
 `web` profile 至少启动过一次（先 `dsh web` 初始化）。脚本会：①软链 skill
 （watcher 即时发现）；②注入/更新 `cordis.patch.yml` 里的 `easyeda-mcp` 条目
 （含 MCP server 与 `EASYEDA_BIN` 的绝对路径）；③打印验证与重启提示。之后

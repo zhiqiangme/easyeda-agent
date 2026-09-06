@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.4.2] — 2026-09-06
+
+### Added
+
+- Introduce the 1.4 schematic connectivity IR: stable component IDs, separate display references and functional roles, complete pin/net/NC records, and reusable Lib membership.
+- Compile measured symbol geometry and local Lib circuits through `sch compose` into guarded, sequential `sch apply` queues. Support compact Z rows, fixed margins, pink dashed frames with 0.2-inch titles, and collision-checked straight terminal leads with staggered lengths.
+- Add `sch designators allocate/plan/verify`: preserve valid references, allocate invalid functional names from official library prefixes, and verify instance identity, geometry and wiring before and after an in-place repair.
+- Add local-only `make release-check` and `make release-build`, version/asset verification, and a tracked-file Skill packager shared by release channels.
+
+### Fixed
+
+- Load every existing page before the global designator guard, including pages not yet visited in the current editor session. Reject incomplete all-page inventories or a failed return to the original page.
+- Improve stale connector/window cleanup, reconnect session handling and connection diagnostics; document that updating an extension does not replace the runtime already loaded by an open editor.
+- Make Skill references and helpers work outside a repository checkout, consolidate the current data-to-Apply workflow, remove obsolete layout instructions and repeated historical notes, and correct Bash installer examples.
+
+### Validation and limits
+
+- The two-page Hongen conversion and separate designator repair were verified against live readback; the final designator repair preserved all 23 components, 165 pins, 84 connections and 81 NC states. Official DRC still reports 15 existing network warnings; this is not a completed electrical-design or PCB acceptance test.
+- Composition consumes supplied circuit data and geometry. It does not invent peripheral circuits, automatically split/create pages, rotate/scale symbols, or generate standalone Notes. Existing strict gates remain in force.
+
 ## [1.3.0] — 2026-09-01
 
 - Add typed `library.model3d.search` and `library.model3d.copy` actions for selecting existing library models without UI automation.

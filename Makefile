@@ -1,4 +1,4 @@
-.PHONY: help test mcp-test fmt actions api-index build install dev-build daemon dev eext eext-fresh connector lint-test blocks-audit layout-calibrate release publish-skill publish-skill-hub skillhub-check replay demo-replay replay-sch replay-pcb
+.PHONY: help test mcp-test fmt actions api-index build install dev-build daemon dev eext eext-fresh connector lint-test blocks-audit layout-calibrate release release-check release-build release-script-test skill-check publish-skill publish-skill-hub skillhub-check replay demo-replay replay-sch replay-pcb
 
 DIST := dist
 
@@ -130,45 +130,37 @@ eext-fresh: ## bump patch + FRESH uuid (imports as new entry; delete the old one
 
 # ── Release ───────────────────────────────────────────────────────────────────
 # Usage: make release VERSION=v0.2.0
-# Prerequisites:
-#   1. gh CLI logged in (gh auth login)
-#   2. connector built: make eext   (only needed when connector changed)
-#   3. repo is public or you have release permissions
+# Preparation (local only, no tags or uploads):
+#   1. synchronize extension/extension.json, package.json, package-lock.json and
+#      SKILL.md to VERSION; add extension/CHANGELOG.md entry
+#   2. stage reviewed new skill files; make release-check VERSION=vX.Y.Z
+#   3. make release-build VERSION=vX.Y.Z; review dist/; commit reviewed sources
+# Actual publication additionally requires explicit authorization and gh login.
 #
 # What it does:
 #   • cross-compiles CLI for darwin/linux/windows (amd64 + arm64)
-#   • copies the latest .eext from extension/build/dist/
-#   • tarballs the merged easyeda-agent skill into skills.tar.gz
+#   • verifies and copies the exact VERSION .eext from extension/build/dist/
+#   • packages tracked/staged public skill files into skills.tar.gz
 #   • creates a git tag, pushes it, and creates a GitHub Release with all assets
 #   • publishes the skill to ClawHub at the same version (best-effort — a hub
 #     outage won't fail the release; retry with `make publish-skill VERSION=…`)
 _LDFLAGS = -s -w -X 'github.com/zhoushoujianwork/easyeda-agent/internal/version.Version=$(VERSION)'
 
-release: ## cross-compile + package + GitHub Release  (VERSION=vX.Y.Z required)
-ifndef VERSION
-	$(error VERSION is required — usage: make release VERSION=v0.5.1)
-endif
-	@echo "── Building release $(VERSION) ──"
-	rm -rf $(DIST) && mkdir -p $(DIST)
-	@echo "  syncing connector version to $(VERSION)..."
-	node extension/scripts/bump.mjs $(VERSION:v%=%) --require-changelog
-	@echo "  syncing skill version to $(VERSION)..."
-	@# SKILL.md 的 metadata.version 不会被 clawhub/gh 自动更新 —— 不同步就漂移。
-	python3 scripts/sync-skill-version.py $(VERSION:v%=%)
-	@# 上面两步会改工作区(extension.json / package.json / SKILL.md)。**必须在打 tag
-	@# 之前提交**,否则 tag 指向的 commit 里版本号还是旧的 —— v1.1.1 就这么发出去过:
-	@# .eext 产物是 1.1.1(bump 在打包之前),但 `git show v1.1.1:extension/extension.json`
-	@# 是 1.1.0,从 tag 检出源码构建会得到落后一个 patch 的连接器。
-	@if ! git diff --quiet -- extension/extension.json extension/package.json skills/easyeda-agent/SKILL.md; then \
-		echo "  committing version sync..."; \
-		git add extension/extension.json extension/package.json skills/easyeda-agent/SKILL.md && \
-		git commit -q -m "chore(release): sync version files to $(VERSION)" && \
-		echo "    committed"; \
-	else \
-		echo "  version files already in sync"; \
-	fi
+skill-check: ## validate tracked skill contents and installed-package local links (offline)
+	python3 scripts/pack-skill.py --check
+
+release-script-test: ## offline tests for release guards, packaging and installed skill helpers
+	python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+release-check: ## check VERSION, changelog and package inputs without building or publishing
+	python3 scripts/release-check.py "$(VERSION)"
+	python3 scripts/pack-skill.py --check
+
+release-build: release-check ## build and verify all release assets locally; no bump, tag, commit or upload
+	mkdir -p "$(DIST)"
 	npm --prefix extension run typecheck
 	npm --prefix extension run build
+	python3 scripts/release-check.py "$(VERSION)" --connector "extension/build/dist/easyeda-agent-connector_$(VERSION).eext"
 	@echo "  compiling CLI..."
 	GOOS=darwin  GOARCH=amd64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/easyeda_darwin_amd64      ./cmd/easyeda
 	GOOS=darwin  GOARCH=arm64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/easyeda_darwin_arm64      ./cmd/easyeda
@@ -176,27 +168,25 @@ endif
 	GOOS=linux   GOARCH=arm64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/easyeda_linux_arm64       ./cmd/easyeda
 	GOOS=windows GOARCH=amd64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/easyeda_windows_amd64.exe ./cmd/easyeda
 	@echo "  packaging connector..."
-	@EEXT=$$(ls extension/build/dist/*.eext 2>/dev/null | sort -V | tail -1); \
-	 [ -n "$$EEXT" ] || { echo "connector build failed"; exit 1; }; \
-	 cp "$$EEXT" $(DIST)/easyeda-agent-connector.eext && echo "  $$EEXT → connector.eext"
+	cp "extension/build/dist/easyeda-agent-connector_$(VERSION).eext" "$(DIST)/easyeda-agent-connector.eext"
 	@echo "  packaging skills..."
-	tar --exclude='*/__pycache__' --exclude='*.pyc' -czf $(DIST)/skills.tar.gz -C skills easyeda-agent
+	python3 scripts/pack-skill.py --out "$(DIST)/skills.tar.gz"
 	cp install.sh $(DIST)/install.sh
-	@echo "  hashing assets..."
-	@# checksums.txt is what `easyeda update` verifies the downloaded binary
-	@# against before swapping it in. Names must stay BARE (no dist/ prefix) —
-	@# the updater matches them against the release asset name.
-	@cd $(DIST) && { command -v sha256sum >/dev/null 2>&1 && SHA=sha256sum || SHA="shasum -a 256"; } && \
-	 $$SHA easyeda_darwin_amd64 easyeda_darwin_arm64 easyeda_linux_amd64 easyeda_linux_arm64 \
-	       easyeda_windows_amd64.exe easyeda-agent-connector.eext skills.tar.gz install.sh > checksums.txt && \
-	 echo "  checksums.txt ($$(wc -l < checksums.txt | tr -d ' ') entries)"
+	python3 scripts/release-check.py "$(VERSION)" --write-checksums "$(DIST)" --artifacts "$(DIST)"
+	@echo "✅ Local release assets ready in $(DIST)/ — nothing published"
+
+release: ## build reviewed sources, tag and publish GitHub Release (explicit publication only)
+	@test -n "$(VERSION)" || { echo "VERSION is required (vX.Y.Z)" >&2; exit 1; }
+	@git diff --quiet && git diff --cached --quiet || { echo "Commit reviewed tracked source changes before publishing; release-build is available for local preparation." >&2; exit 1; }
+	@if git show-ref --verify --quiet "refs/tags/$(VERSION)"; then echo "Tag $(VERSION) already exists; choose a new version instead of replacing published assets." >&2; exit 1; fi
+	$(MAKE) release-build VERSION="$(VERSION)" DIST="$(DIST)"
 	@echo "  creating GitHub release..."
-	git tag -a $(VERSION) -m "Release $(VERSION)" 2>/dev/null || echo "  (tag $(VERSION) already exists, reusing)"
+	git tag -a $(VERSION) -m "Release $(VERSION)"
 	git push origin $(VERSION)
 	@awk '/^## \[$(VERSION:v%=%)\]/{f=1} f&&/^## \[/&&!/^## \[$(VERSION:v%=%)\]/{exit} f' extension/CHANGELOG.md > $(DIST)/changelog-section.md
 	@{ \
 		cat $(DIST)/changelog-section.md; \
-		printf '\n---\n\nAlready installed? Upgrade in place:\n```\neasyeda update          # CLI binary (sha256-verified) + skill dirs\neasyeda update --check  # report only\n```\n\nFirst install:\n```\ncurl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh\n```\n\nInstalls/updates:\n- easyeda CLI/daemon\n- easyeda-agent skill for Codex (~/.codex/skills) and/or Claude Code (~/.claude/skills) when detected\n- prints EasyEDA connector .eext import URL\n\nThe connector .eext is never auto-updated for sideloads — `easyeda update` reports a stale one and prints the re-import URL.\n\nSkill targets: set `EASYEDA_INSTALL_SKILLS=codex,claude` to force targets, `none` to skip, or `EASYEDA_SKILL_PRESERVE=1` to keep local edits.\n\n`checksums.txt` lists sha256 for every asset above.\n'; \
+		printf '\n---\n\nAlready installed? Upgrade in place:\n```\neasyeda update          # CLI binary (sha256-verified) + skill dirs\neasyeda update --check  # report only\n```\n\nFirst install:\n```\ncurl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash\n```\n\nInstalls/updates:\n- easyeda CLI/daemon\n- easyeda-agent skill for Codex (~/.codex/skills) and/or Claude Code (~/.claude/skills) when detected\n- prints EasyEDA connector .eext import URL\n\nThe connector .eext is never auto-updated for sideloads — `easyeda update` reports a stale one and prints the re-import URL.\n\nSkill targets: set `EASYEDA_INSTALL_SKILLS=codex,claude` to force targets, `none` to skip, or `EASYEDA_SKILL_PRESERVE=1` to keep local edits.\n\n`checksums.txt` lists sha256 for every asset above.\n'; \
 	} > $(DIST)/release-notes.md
 	gh release create $(VERSION) \
 		$(DIST)/easyeda_darwin_amd64 \
@@ -216,8 +206,8 @@ endif
 	@echo "✅ Released: https://github.com/zhoushoujianwork/easyeda-agent/releases/tag/$(VERSION)"
 
 # 单独发布 skill 到 ClawHub(release 失败后重试用)。
-# 注意:必须用 $(CURDIR) 绝对路径 —— clawhub 的 workdir 可能被全局配置(如 ~/clawd)
-# 劫持,相对路径 skills/easyeda-agent 会解析到别处、把旧副本发上去(0.8.1 踩过)。
+# 注意:必须传临时包的绝对路径 —— clawhub 的 workdir 可能被全局配置(如 ~/clawd)
+# 劫持；和 GitHub 共用 tracked 文件打包器，不直接发布带本地草稿的工作目录。
 # ClawHub 版本号不可覆盖,重名直接报错;版本与 repo tag 对齐(去掉 v 前缀)。
 #
 # 发现性 tags:ClawHub 的 tags 是发布时随版本上传的 dist-tag 映射({tag:version},
@@ -231,9 +221,12 @@ publish-skill: ## publish skills/easyeda-agent to ClawHub  (VERSION=vX.Y.Z requi
 ifndef VERSION
 	$(error VERSION is required — usage: make publish-skill VERSION=v0.8.2)
 endif
-	@find $(CURDIR)/skills/easyeda-agent -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null; \
-		find $(CURDIR)/skills/easyeda-agent -name '*.pyc' -delete 2>/dev/null; true
-	clawhub publish $(CURDIR)/skills/easyeda-agent --slug easyeda-agent --version $(VERSION:v%=%) \
+	@set -e; \
+	STAGE=$$(mktemp -d -t clawhub-pkg.XXXXXX); \
+	trap 'rm -rf "$$STAGE"' EXIT; \
+	python3 scripts/pack-skill.py --out "$$STAGE/skills.tar.gz"; \
+	tar -xzf "$$STAGE/skills.tar.gz" -C "$$STAGE"; \
+	clawhub publish "$$STAGE/easyeda-agent" --slug easyeda-agent --version $(VERSION:v%=%) \
 		--tags "$(CLAWHUB_TAGS)" \
 		--changelog "easyeda-agent $(VERSION) — https://github.com/zhoushoujianwork/easyeda-agent/releases/tag/$(VERSION)"
 
@@ -407,9 +400,9 @@ endif
 	trap 'rm -rf "$$STAGE"' EXIT; \
 	python3 -c "$$SKILLHUB_RESOLVE_PY" "$$STAGE/skillhub-bin"; \
 	SH="bash $$STAGE/skillhub-bin"; \
-	cp -R $(CURDIR)/skills/easyeda-agent "$$STAGE/$(SKILLHUB_SLUG)"; \
-	find "$$STAGE/$(SKILLHUB_SLUG)" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true; \
-	find "$$STAGE/$(SKILLHUB_SLUG)" -name '*.pyc' -delete 2>/dev/null || true; \
+	python3 scripts/pack-skill.py --out "$$STAGE/skills.tar.gz"; \
+	tar -xzf "$$STAGE/skills.tar.gz" -C "$$STAGE"; \
+	if [ "$(SKILLHUB_SLUG)" != "easyeda-agent" ]; then mv "$$STAGE/easyeda-agent" "$$STAGE/$(SKILLHUB_SLUG)"; fi; \
 	find "$$STAGE/$(SKILLHUB_SLUG)" -type f ! -name '*.*' -delete 2>/dev/null || true; \
 	python3 -c "$$SKILLHUB_INJECT_PY" "$$STAGE/$(SKILLHUB_SLUG)/SKILL.md" "$(SKILLHUB_SLUG)" "$(SKILLHUB_DISPLAY_NAME)"; \
 	echo "  skillhub dry-run..."; \

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # easyeda-agent installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
 set -euo pipefail
 
 REPO="zhoushoujianwork/easyeda-agent"

@@ -16,10 +16,9 @@
 
 ![easyeda-agent workflow](docs/assets/easyeda-agent-workflow.svg)
 
-> **当前版本:v1.0.0 —— 原理图功能正式上线。** AI Agent 通过类型化命令操作 EasyEDA Pro,
-> 从一份客户口吻的需求文档出发,原理图全流程(S0–S6:方案书 → 分页 → 分区 → 摆放 →
-> 布线 → 机械门禁 → 交付)已可正式交付;PCB 流程(P0–P10)持续演进中。
-> 真机成图见下方[实战展示](#实战展示一份需求文档--三页原理图正式交付)。
+> **当前开发候选:v1.4.2。** 原理图以器件、引脚与连接图为依据,先在本地数据中设计
+> Lib 电路与几何,再通过 `sch compose` 组合单页、`sch apply` 顺序执行并回读验证。
+> 发布状态、构建步骤与尚未完成的验收见 [1.4 发布准备](docs/release-1.4.md)。
 
 `easyeda-agent` 把官方 EasyEDA 扩展 API 变成一套**有类型、可观测、Skill 友好**的系统。EasyEDA 插件保持极薄——它连到本地 agent、只执行被批准的动作;Go CLI/daemon 掌管协议、状态、产物、校验和面向用户的工作流。
 
@@ -27,7 +26,7 @@
 
 上游 `run-api-gateway` 证明了关键入口:代码能跑在 EasyEDA 内、访问官方 `eda` 对象。但它把「裸 JavaScript 执行」当作主工作流——强大,但对 AI agent 太脆弱。
 
-本项目的连接器是真实可用的:daemon **固定监听单端口 `60832`(`0xEDA0`,"EDA" 写进十六进制;0.15.0 起弃用与官方 gateway 冲突的 49620)**(不外溢、被占用时自动接管旧 easyeda daemon)、连接器锁定该端口、校验握手、**自愈重连**、把一套**有类型的动作目录**分发到官方 `eda.*` API。裸 JS 仅作为需二次确认的 `debug.exec_js` 逃生口保留。
+本项目的连接器是真实可用的:daemon **默认固定监听单端口 `60832`**(不外溢、被占用时自动接管旧 easyeda daemon)、连接器锁定该端口、校验握手、**自愈重连**、把一套**有类型的动作目录**分发到官方 `eda.*` API。`debug.exec_js` 保留为任务范围内的临时调试入口。
 
 - **Skill** 描述专家工作流和护栏;
 - **Go CLI/daemon** 暴露稳定的 typed actions;
@@ -61,8 +60,8 @@
 | 能力域 | 做什么 |
 |---|---|
 | **电路块库(旗舰特色)** | 社区共建、署名可追的**成熟外设电路库**(`easyeda blocks`,**37 块:19 ready / 13 verified / 5 draft**):CH340 USB 串口、ESP32 自动下载、按键去抖、USB-HUB、降压…`sch block-apply` **一条命令放件 + 连线 + 网表对账**,照抄拓扑、只重绑引脚网络即可复用 |
-| 原理图(**v1.0.0 正式上线**) | 全流程 S0–S6 可交付:库优先放件(真实 LCSC/JLC 器件)、编组、布线、netflag/netport;**三层布局体系 Sheet→Zone→Group**——分区框 + 区名 + 电路说明由算法计算落位,生成与校验用同一把尺 |
-| 机械门禁与审计 | `sch gate --strict` 一条命令过**五关**(layout-lint→clusters→check→bridge-check→drc),bridge-check 新增 **orphan-tree 悬空树**判据(连接器 ≥0.26.1);跨页网名审计 `sch nets --strict` + 块对账 `sch reconcile` + netlist 黄金表逐脚比对 |
+| 原理图 | canonical 连接图 → Lib 局部几何 → `sch compose` 单页 Z 字等高行组合 → `sch apply`;正常位号与功能 Role 分离,粉色虚线方框配 0.2 inch 标题,按上下空档压缩高度 |
+| 机械门禁与审计 | 本地数据检查、Apply 后逐脚/网络/NC/几何回读;`sch gate --strict` 四阶段(layout-lint→check→bridge-check→drc);跨页网名审计 `sch nets --strict` + 块对账 `sch reconcile` |
 | PCB | 自动布局、板框、禁布区、规则感知短线布线、4 层电源平面、铺铜、丝印避让、DRC/`pcb check` |
 | 设计流程 | 从**客户口吻需求**到成品的门控主脊(S0–S6 + P0–P10),里程碑确认,存盘检查点 |
 | 产物 | BOM(补 LCSC C 号)、网表、导出、原生截图、审计日志、录制→回放 |
@@ -90,12 +89,12 @@ USB-HUB…这些电路的**内部拓扑是死的**,每次重画等于重趟坑�
 > (CLI / 连接器 `.eext` / Skill / EasyEDA)的安装、版本对齐、启动 daemon、升级纪律
 > 与常见卡点速查,一页讲清。下面是精简版。
 
-easyeda-agent 是一套**四件套**,四者需**同版本、同时在位**:CLI/daemon、连接器
+easyeda-agent 是一套**四件套**,四者需**同时在位**:CLI/daemon、连接器
 `.eext` 插件、`easyeda-agent` Skill、开启「允许外部交互」的 EasyEDA Pro。**升级时
 三方(CLI + 连接器 + Skill)要一起升到同一版本**,否则 `easyeda daemon health` 会把
 落后的连接器标成 stale。
 
-先装 `easyeda` CLI/daemon,再装 EasyEDA 连接器 —— 两条通道任选:安装器会打印**与 CLI 严格同版**的 GitHub Release `.eext` 下载地址(导入即用),或从[**立创官方插件市场**](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)一键安装(平台可原地自动更新,但市场版本可能滞后 CLI,严格四件套同版时以 Release `.eext` 为准):
+先装 `easyeda` CLI/daemon,再装 EasyEDA 连接器 —— 两条通道任选:安装器会打印**与 CLI 严格同版**的 GitHub Release `.eext` 下载地址,或从[**立创官方插件市场**](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)一键安装(平台可原地自动更新,但市场版本可能滞后 CLI,严格三方同版时以 Release `.eext` 为准):
 
 > **ℹ️ 插件更名说明(2026-08)**:应市场管理规范要求,插件**显示名**改为
 > **EDA Agent Connector**(不再含 "easyeda" 字样)。经与市场管理员确认,内部包名
@@ -103,7 +102,7 @@ easyeda-agent 是一套**四件套**,四者需**同版本、同时在位**:CLI/d
 > 已装用户的原地自动更新不受影响,无需任何操作。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
 ```
 
 一键脚本会：安装/更新 `easyeda` CLI/daemon;自动检测已安装的客户端并把 `easyeda-agent` skill 安装/更新到对应目录 —— Codex(`~/.codex/skills/easyeda-agent`)、Claude Code(`~/.claude/skills/easyeda-agent`);打印连接器 `.eext` 导入地址。
@@ -123,10 +122,10 @@ dev 构建(git-describe 版本号)默认不覆盖,`--force` 才强升;二进制�
 可用环境变量控制 skill 安装:
 
 ```bash
-EASYEDA_INSTALL_SKILLS=codex,claude curl -fsSL .../install.sh | sh  # 指定目标
-EASYEDA_INSTALL_SKILLS=none          curl -fsSL .../install.sh | sh  # 跳过 skill
-EASYEDA_SKILL_PRESERVE=1             curl -fsSL .../install.sh | sh  # 保留本地改动
-EASYEDA_VERSION=<vX.Y.Z>              curl -fsSL .../install.sh | sh  # 指定版本(跳过 API 查询)
+curl -fsSL .../install.sh | EASYEDA_INSTALL_SKILLS=codex,claude bash  # 指定目标
+curl -fsSL .../install.sh | EASYEDA_INSTALL_SKILLS=none bash  # 跳过 skill
+curl -fsSL .../install.sh | EASYEDA_SKILL_PRESERVE=1 bash  # 保留本地改动
+curl -fsSL .../install.sh | EASYEDA_VERSION='<vX.Y.Z>' bash  # 指定版本(跳过 API 查询)
 ```
 
 **遇到 `403` / GitHub API 限流**:脚本默认要调一次 `api.github.com` 解析 latest
@@ -137,7 +136,7 @@ release,匿名调用每个 IP 每小时只有 60 次 —— 公司出口 / NAT /
 export GITHUB_TOKEN=<token>   # 或 GH_TOKEN;已登录 gh CLI 时会自动取 `gh auth token`
 gh auth login                 # 等价做法,额度提升到 5000/小时
 
-EASYEDA_VERSION=<vX.Y.Z> curl -fsSL .../install.sh | sh   # 或者直接锁版本,完全不碰 API
+curl -fsSL .../install.sh | EASYEDA_VERSION='<vX.Y.Z>' bash   # 或者直接锁版本,完全不碰 API
 ```
 
 可用 tag 见 [Releases](https://github.com/zhoushoujianwork/easyeda-agent/releases)。
@@ -149,10 +148,8 @@ Skill slug 为 `easyeda-agent`(后缀有意为之,区分于官方 EasyEDA 工具
 clawhub install easyeda-agent
 ```
 
-> 国内用户注意:skillhub.cn 目前是纯网页社区,未实现 CLI 安装接口
-> (`/api/cli/v1` 返回的是网页而非 API),`skillhub install --registry
-> https://skillhub.cn` 无法工作。请改用上面的一键脚本,或从 GitHub Release
-> 下载 `skills.tar.gz` 解压到 `~/.claude/skills/` 或 `~/.codex/skills/`。
+> SkillHub 另有[官方 CLI](https://skillhub.cn),与其他同名 `skillhub` 工具不兼容。
+> 需要与 CLI/连接器保持同版时,使用上面的一键安装器或 GitHub Release 的 `skills.tar.gz`。
 
 > EasyEDA 需开启「**允许外部交互**」,连接器的 WebSocket 才能连到本地 daemon。
 
@@ -236,13 +233,13 @@ P3 USB 页:CH340 USB 串口、USB-C 接口、自动下载等四个功能分区�
 
 ## 能力清单(已支持)
 
-均以 typed CLI 子命令暴露(`easyeda <domain> <verb>`),每项都在固定的 ESP32-S3 回归板上真机验证过。
+以 typed CLI 子命令暴露(`easyeda <domain> <verb>`)。当前候选的验证范围与未完成项见 [1.4 发布准备](docs/release-1.4.md)。
 
 **原理图** — 完整功能地图(已支持 40+ 子命令按功能域 + 待支持路线)见 **[docs/cli/schematic.md](docs/cli/schematic.md)**(CLI 功能索引:[docs/cli/](docs/cli/README.md));摘要:
 - **器件与库**:从立创/LCSC 库按 uuid 放**真实器件**、换型号(`replace`)、符号/封装重绑、C 号确定性解析(`resolve-lcsc`);`modify` 属性 **merge 语义**(只 patch 顶层字段不再清空自定义属性,#175)。
 - **连线**:`connect`/`autoconnect`(**打分器**自选方向——碰撞/穿件/图签/fanout 全几何成本,netport **竖排折叠惩罚**让密集引脚列标签保持水平)/`disconnect` 成对删;电源/地标志自动补偿旋转存储的坑。
-- **布局与可读性——三层布局体系 Sheet→Zone→Group**:模块感知**自动布局**(template/official 双引擎)、对齐/等距/刚体平移;**分页 reconcile + 数据驱动分区框(`zone-plan`/`zone-draw`,校验压图签/贴边全 0 才许画)+ 每模块电路说明(`note`)**——分区框/区名/说明由算法计算落位,**生成与校验用同一把尺**;多器件页未分区会被 `sch check` 的 missing-partition 机械拦下。
-- **校验门**:`sch gate --strict` 一条命令过**五关**(layout-lint→clusters→check→bridge-check→drc);bridge-check 新增 **orphan-tree 悬空树**判据(挪件残留 flag+桩线/裸死线,连接器 ≥0.26.1);check 重建逐项 finding(悬空脚/交叉/压引脚/重合标志/**标签折叠**…);**layout-score** 布局质量诊断,逐项归因**带可执行 fix 命令**。
+- **数据与布局**:连接图保留稳定器件 ID、引脚、网络与 NC;合法数字位号保持原样,功能名称存 Role。`sch compose` 基于已设计的 Lib 几何离线组合单页,从左上向右按 Z 字排列、各行等高;`sch frame apply/check` 生成并检查粉色虚线框与 0.2 inch 标题,优先利用电路上下空档。组合器不推导任意外围电路、不自动分页或删除源页。
+- **转换与校验**:`sch apply` 串行执行规划队列,核对前置状态并回读引脚/网络/NC/几何;失败后重读重规划。`sch gate --strict` 四阶段(layout-lint→check→bridge-check→drc),覆盖重叠、悬空、短路与官方 DRC;`layout-score` 提供布局质量诊断。
 - **跨页网名审计与对账**:`sch nets --strict`(网名变体/单引脚网机械拦截)+ `sch reconcile` 设计意图对账 + netlist **黄金表逐脚比对**——「接得合法」与「接对没有」分别有门。
 - **电路块库**:`block-apply` 一键实例化验证过的拓扑(37 块:19 ready / 13 verified / 5 draft,离线可查),放件+连线+网表对账一条命令;`extract-layout` 真板反推模板。
 - 一次调用 **`sch read`**(器件+网络+检查)、**BOM**/**网表**导出(自动补 LCSC C 号)、页面导图 SVG/PNG/PDF。

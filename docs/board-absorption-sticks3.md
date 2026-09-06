@@ -97,7 +97,7 @@ deviceUuid/LCSC 全 TBD,待真机 `--probe` 刷符号脚 + `block-apply` 网表�
 1. `easyeda lib search` 解析每个新料的 libraryUuid/deviceUuid/LCSC C 号,写回 `standard-parts.json`
    (当前全 TBD):ES8311 / AW8737A / BMI270 / MSM381 / ST7789-BTB / VSOP38338 / IR928 /
    SY7088 / LGS4056 / CH213K / CJ3439KDW / 2N7002DW / SDMM0806 / ESP32-S3-PICO-1 等。
-2. `blocks-pin-audit.py --probe` 刷 `symbol-pins.json` 快照(把新料真实符号脚读回)。
+2. `blocks-pin-audit.py --probe --project <scratch> --doc <page> --allow-clear` 在专用测量页刷新 `symbol-pins.json` 快照(把新料真实符号脚读回)。
 3. `blocks-pin-audit.py` 离线判定 → 修 fanout/missing(功能名 vs 真实脚名对不上处)。
 4. `sch block apply` 孤立单放 + **netlist 逐网对账**(唯一可信判据)→ 升 verified,
    写回 `verification` 与 `validated`。见 `references/standard-blocks-contributing.md`。

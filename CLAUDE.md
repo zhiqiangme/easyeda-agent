@@ -6,7 +6,7 @@ running inside EasyEDA, which calls the official `eda.*` API.
 
 ```
 skill ──▶ Go CLI/daemon ──WebSocket──▶ connector .eext ──▶ eda.* API
-          (typed actions)   60832-60841   (in EasyEDA Pro)
+          (typed actions)      60832      (in EasyEDA Pro)
 ```
 
 ## 官方插件库调研参考
@@ -58,18 +58,17 @@ on `main` by default (user preference). Don't `git checkout -b`; just commit to
 
 | Path | What |
 |---|---|
-| `cmd/easyeda` + `internal/{app,daemon,protocol}` | Go CLI + daemon. `internal/protocol/actions.go` = the 20 typed actions. Daemon: `/health`, `/eda` (connector WS), `/action`. |
-| `extension/` | TypeScript connector → esbuild → `.eext`. `src/transport.ts` (port-scan + auto-reconnect), `src/actions.ts` (eda.* handlers + `connect_pin`). |
+| `cmd/easyeda` + `internal/{app,daemon,protocol}` | Go CLI + daemon. `internal/protocol/actions.go` = the typed action catalog. Daemon: `/health`, `/eda` (connector WS), `/action`. |
+| `extension/` | TypeScript connector → esbuild → `.eext`. `src/transport.ts` (fixed-port reconnect with backoff), `src/actions.ts` (eda.* handlers + `connect_pin`). |
 | `skills/easyeda-agent/` | Merged public skill — short `SKILL.md` router plus `references/` for design flow, schematic, PCB, conventions, canonical data, and `scripts/` for lint/BOM/parts/calibration tools. |
-| `docs/FEATURES.md` | Feature-status inventory (20 actions grouped by capability) + roadmap. |
+| `docs/FEATURES.md` | Feature-status inventory (actions grouped by capability) + roadmap. |
 | `docs/pcb-design-rules.md` | PCB 设计规范手册 — 线宽/间距/过孔/布局/走线/铺铜/Mark点/拼板/叠层/DRC 清单，基于 JLC 工艺能力 + IPC-2221。 |
 | `skills/easyeda-agent/SKILL.md` | The user-facing skill. |
 
 ## Dev workflow
 
 **Keep the daemon hot-reloading while you work** (rebuilds + restarts on any `.go`
-change; the connector auto-reconnects because it port-scans 60832-60841 in the
-background):
+change; the connector reconnects to the fixed default port 60832 with backoff):
 
 ```bash
 make dev          # air live-reload of `easyeda daemon` — leave running in a terminal
@@ -110,38 +109,75 @@ skills/easyeda-agent/scripts/lint.sh <project> --save   # full lint + record bas
 
 ## Release workflow
 
+发布分为本地准备与外部发布。准备阶段先显式同步
+`extension/extension.json`、`extension/package.json`、`extension/package-lock.json`
+的版本（含 lock 的 `packages[""].version`），补齐 `extension/CHANGELOG.md` 对应条目，
+再同步 Skill。下面的版本号须替换为本次完整 `vX.Y.Z` 版本：
+
 ```bash
-# 一条命令发版：自动把 connector + CLI 统一到同一版本，交叉编译 5 平台，
-# 打包 skills.tar.gz，创建 GitHub Release 并上传所有 assets。
-make release VERSION=v0.5.1
-
-# 用户一行安装
-curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh
-
-# 装过之后的升级路径（不必再跑脚本）
-easyeda update            # CLI 二进制 + skill 目录 → latest
-easyeda update --check    # 只读三方版本表（cli / skill / connector）
+python3 scripts/sync-skill-version.py X.Y.Z   # 准备时显式写 metadata.version
+make skill-check                            # 离线检查公共 Skill 文件及安装后链接
+make release-check VERSION=vX.Y.Z           # 校验版本、Changelog、打包输入；不修改源码
+make release-build VERSION=vX.Y.Z           # 本地构建并核对全部资产；不提交、打 tag 或上传
 ```
 
-**`easyeda update` 与发版的契约**：`make release` 会生成并上传 `checksums.txt`（裸文件名，
-`internal/selfupdate` 按 release asset 名匹配）——`update` 有它就校验 sha256，没有（旧 release）
-就降级成「跑一次下载的二进制、比对版本号」。**改动 release 资产命名 = 改动自更新的输入**，
-两边要一起改：`Makefile` 的 `release` 目标 ↔ `selfupdate.AssetName`。
+`release-check` 要求 connector manifest、npm/lock 和 Skill 版本全部匹配，拒绝缺失的
+Changelog。`release-build` 生成五平台 CLI、准确版本/UUID 的连接器、`skills.tar.gz`、
+安装脚本和 `checksums.txt`，并验证资产与本机 CLI 的版本。它不会自动 bump 或提交源码。
+`make eext` 仍是开发期升 patch 的快捷入口，不代替发布准备所需的完整版本同步。
 
-**版本号约定**：CLI、connector 和 skill 始终用同一版本号（`make release` 负责把 `extension.json` **和 `SKILL.md` 的 `metadata.version`** 同步到 VERSION，不需要提前跑 `make eext`）。skill 侧同步脚本是 `scripts/sync-skill-version.py`（`--check` 只校验不写，可单独跑）——**改 frontmatter 时别动 `  version:` 那行的两空格缩进格式**，脚本按它定位。注意与安装态的 `.version` 标记文件区分：那是 `easyeda update` 写在 skill 目录里的运行时标记（`internal/selfupdate`），`metadata.version` 是随包发布、离线可读的声明式元数据，发版后两者同值。`make release` 会自动打 git tag、push 并创建 GitHub Release，**并把 skill 同版本发布到 ClawHub**（best-effort，失败不阻断；重试 `make publish-skill VERSION=…`，需已 `clawhub login`）。ClawHub 版本号不可覆盖；`publish-skill` 必须用绝对路径——clawhub 的 workdir 会被全局配置劫持到 `~/clawd`，相对路径会把旧副本发上去（0.8.1 踩过）。
+Skill 包只包含 Git 已跟踪/已暂存文件的当前内容；新公共参考须先审阅并暂存，本地
+草稿不入包。`make skill-check` 验证链接在仅安装 Skill 的目录中仍然成立。
+GitHub、ClawHub 和 SkillHub 共用此受控打包器，不直接上传夹带草稿的工作目录。
 
-**skillhub.cn 走 CI 自动发布**（订正旧结论「skillhub.cn 无 CLI API（纯网页社区），不集成」——**现在有真 CLI 了**）。链路：`make release` 里的 `gh release create` 发出 `release: published` → `.github/workflows/publish-skill.yml` 触发 → 跑 `make publish-skill-hub VERSION=…`。**`release` 目标本身不用改**，也不要把 skillhub 塞进它的主流程。
+完成验收并提交已审阅源码后，只有得到发布指令才运行：
 
-- **token**：仓库 secret `SKILLHUB_TOKEN`（`skh_` 开头，建于 https://skillhub.cn/dashboard/keys ）。skillhub CLI **原生读同名环境变量**（优先级 `--token` > `SKILLHUB_TOKEN` > `~/.skillhub/credentials.json`），所以 CI 里**不跑 `skillhub login`**、凭据不落 runner 磁盘。**任何情况下都不要把 token 写进文件或 echo 出来。**
-- **手动补发**：`export SKILLHUB_TOKEN=skh_xxx && make publish-skill-hub VERSION=v1.0.3`，或在 Actions 页手动跑该 workflow（`workflow_dispatch` 填版本号）。只想验打包不真发：`make publish-skill-hub VERSION=… SKILLHUB_DRY_RUN=1`（不需要 token）。
-- **两套 frontmatter 规范互斥，所以必须发 staging 副本**：skillhub 硬性要求顶层 `slug` + `displayName`（缺一个直接 die），而官方 Agent Skills 规范验证器 `npx skills-ref@latest validate` **明确拒收这两个字段**。因此 repo 里的 `SKILL.md` 保持 spec 干净，`publish-skill-hub` 把 skill 拷到临时目录、只往副本注入这两个键（**幂等**：哪天 `SKILL.md` 自带了就自动跳过）。**别为了发 skillhub 去改 repo 的 `SKILL.md`，那会当场破坏 `skills-ref` 门禁。**
-- **版本号**：workflow 从 release tag 取（剥 `v` 前缀），经 `skillhub publish --version` 覆盖，所以**不依赖 `SKILL.md` 的 `metadata.version`**，tag 是唯一版本源。必须是合法 SemVer（`v1.0` 会被拒）。
-- **版本不可覆盖**（同 ClawHub）：同 slug 同 version 重发被服务端拒（409），补发请升版本号。发布后进 `pending_review` 审核队列，不是立刻可见。
-- **装 CLI 只认官方脚本**：`curl -fsSL https://skillhub.cn/install/install.sh | bash -s -- --cli-only`（装到 `~/.local/bin/skillhub`）。
-- **`skillhub` 这个 bin 名被两个项目占用，且可能同时在 PATH 上**（本机实测就是：homebrew/npm 的 `skillhub`（skills.palebluedot.live，Node）排在官方前面）。冒牌货的 `publish` 只有 `--namespace/--visibility/--registry`，没有 `--version/--host` —— 轻则炸在 `unknown flag: --version`，**重则静默发布到错误的 registry**。所以这里**不做「注释警告」，做机械检查**：`make skillhub-check`（判据 = 探 `publish --help` 是否暴露我们真正会传的 `--version/--host/--changelog/--dry-run`，绑定「用得上的能力」而非版本号字符串；不靠路径判断）。`publish-skill-hub` 内部先跑同一套解析，CI 里也是独立一步。解析顺序：`$SKILLHUB_BIN` → `~/.local/bin/skillhub` → `~/.skillhub/skills_store_cli.py` → PATH 上所有 `skillhub`，**每个候选都要过身份校验，不过就跳下一个**。要钉死用哪个：`export SKILLHUB_BIN=~/.local/bin/skillhub`。
-  > 教训：这个坑我第一版**只写进了注释**，然后当场踩中（`command -v skillhub` 存在性检查选中了冒牌货）。**注释拦不住 PATH 解析——知道风险却只写成文字，遵守率上不去，必须做成机械检查。**
+```bash
+make release VERSION=vX.Y.Z
+```
 
-**Changelog 门禁**：`extension/CHANGELOG.md` 必须有对应版本的 `## [x.y.z]` 条目。`make release` 会**硬校验**（缺条目直接报错退出，发版前先补 changelog）；`make eext`（dev 循环）只**警告**不阻断。校验逻辑在 `extension/scripts/bump.mjs`（`--require-changelog`）。
+`release` 要求已跟踪源码没有未提交改动、tag 不存在；它重新执行 `release-build`，
+然后创建并推送 tag、发布 GitHub Release，最后 best-effort 发布到 ClawHub。
+它不再修改版本或自动提交。不能覆盖已发布版本；只做准备的任务停在本地资产验收。
+
+用户安装和升级：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
+easyeda update            # CLI + 已安装 Skill → latest
+easyeda update --check    # 只读 CLI / Skill / connector 版本表
+```
+
+安装变量要传给执行脚本的 `bash`，例如管道右侧 `EASYEDA_INSTALL_SKILLS=codex,claude bash`，
+不要只设置在 `curl` 一侧。连接器侧载包仍需卸载旧项后导入新包，保存并重开编辑器加载新运行时。
+
+**版本与自更新契约**：CLI、connector、Skill 发布版本一致。
+`scripts/sync-skill-version.py --check` 只核验不写入，`release-check` 负责检查准备结果。
+`metadata.version` 保持两空格缩进的 `  version:` 格式；安装态 `.version` 是自更新器
+写入的运行时标记，和包内声明不是同一个文件。`checksums.txt` 使用裸资产文件名；
+改资产名时同步 `scripts/release-check.py`、Makefile 与 `internal/selfupdate.AssetName`。
+自更新遇到没有校验和的旧 release，会通过执行下载二进制比对版本作兼容检查。
+
+### 外部发布平台
+
+- **ClawHub**：`release` 尾部 best-effort 发布；失败可在已有发布授权下用
+  `make publish-skill VERSION=vX.Y.Z` 重试，需要 `clawhub login`。
+  同版本不可覆盖。发布使用临时包的绝对路径，避免全局 workdir 导向另一份 Skill；
+  `CLAWHUB_TAGS` 必须保留 `latest`，否则最新安装指针不会更新。
+- **skillhub.cn**：GitHub `release: published` 触发 `.github/workflows/publish-skill.yml`，
+  也可手动触发或用 `make publish-skill-hub VERSION=vX.Y.Z` 补发。
+  `SKILLHUB_DRY_RUN=1` 只做打包和平台预检。版本来自 release tag/手动输入的 SemVer，
+  同 slug 同版本不能覆盖，发布后还需平台审核。
+- **SkillHub 身份与凭据**：只使用官方 CLI 安装器
+  `curl -fsSL https://skillhub.cn/install/install.sh | bash -s -- --cli-only`。
+  同名 CLI 可能属于其他服务，`make skillhub-check` 按实际 `publish` 参数校验身份，
+  必要时用 `SKILLHUB_BIN` 指定。仓库 secret 为 `SKILLHUB_TOKEN`；CI 的身份检查会在
+  临时 runner 登录再 `auth whoami`，publish 读取同名环境变量。不要回显 token 或写进工程文件。
+- **SkillHub 包格式**：其 `slug/displayName` 只注入临时 staging 副本；仓库 `SKILL.md`
+  保持 Agent Skills 格式。不要为了平台字段破坏公共包的 frontmatter。
+- **立创连接器市场 jlc-ext**：仍需人工通过网页提交，没有发布 CLI/API。
+  市场可自动更新已安装连接器，但可能落后于 GitHub Release；不能把仓库发布成功
+  当成市场已更新。更多候选验收范围见 [docs/release-1.4.md](docs/release-1.4.md)。
 
 ## Skill scripts usage
 
@@ -169,7 +205,8 @@ make lint-test    # = python3 skills/easyeda-agent/scripts/tests/run.py
 # 块引脚引用审计 —— 块按功能名引用引脚,此前无人对过真实符号,导致块标着
 # verified 却静默错接(ch340c 的 USB 口根本没供电)。离线判定,非零退出可 gate。
 skills/easyeda-agent/scripts/blocks-pin-audit.py            # 审全库(离线,用引脚表快照)
-skills/easyeda-agent/scripts/blocks-pin-audit.py --probe    # 刷新快照(需连编辑器)
+skills/easyeda-agent/scripts/blocks-pin-audit.py --probe --project <scratch> --doc <page> --allow-clear
+# 仅清空并使用明确指定的专用测量页；无需补测时不写画布。
 
 # 暴露面健康度体检 —— 读 ~/.easyeda-agent/audit/*.jsonl,离线,不需要连编辑器。
 # 出「调用分布+失败率 / 错路回退 / 逐日多样性」三张表。判读法:长尾失败率显著
@@ -198,33 +235,17 @@ reaches the daemon.
 
 ## Load-bearing gotchas
 
-- **Re-importing the connector: EasyEDA dedups installed extensions by UUID.**
-  Importing a build whose uuid is already installed **silently fails** unless you
-  first **uninstall the old one** in the 已安装 tab — a version bump alone is NOT
-  enough (this bit us on v0.4.2). Two paths: **`make eext`** keeps the uuid stable
-  → the normal update-in-place (uninstall old → import the printed `.eext`, one
-  entry). **`make eext-fresh`** mints a new uuid → imports as a *separate* entry
-  with no uninstall, but you must delete the stale one (two connectors fight over
-  the daemon otherwise) — it's the fallback when the installed one won't
-  uninstall. Our manifest is complete. **Marketplace status: LIVE again at
-  v0.21.2** — https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector
-  (same slug/entry; only the `displayName` changed to "EDA Agent Connector" —
-  must not contain "easyeda"; the internal `name` and uuid both stayed, per the
-  admins — the earlier "扩展名错误" came from changing `name` on the same-uuid
-  listing). Existing installs keep auto-updating in place. Two install
-  channels remain: (1) a **sideloaded `.eext`** (the `make eext` /
-  GitHub-Release path above) has **no in-place auto-update** (manual
-  uninstall→import) but is **strictly version-locked to the CLI**, so it stays the
-  source of truth for dev/regression; (2) a **marketplace-installed** copy the
-  platform **can auto-update in place** — but the listing **lags** (there is no
-  publish CLI/API for jlc-ext — each release is a manual web-portal re-submit),
-  so a marketplace connector can be **older** than
-  your CLI and flag `connectorVersionOk:false`. **Most changes don't
-  even need a re-import — use the `debug.exec_js` escape hatch** for scriptable
-  behavior; only manifest/handler changes require a rebuild. **And re-importing
-  does NOT reload already-open EasyEDA windows** — an open window keeps running the
-  OLD connector code and fights the freshly-imported one over the daemon socket;
-  **fully quit and relaunch EasyEDA** to load new connector code.
+- **Connector upgrade and marketplace boundaries.** EasyEDA deduplicates installed
+  extensions by UUID: sideload upgrades use the stable UUID, uninstall the old entry,
+  then import the new `.eext`. `make eext-fresh` is a fallback that creates a separate
+  entry; remove the stale one afterward. Save documents and fully quit/relaunch
+  EasyEDA to stop old connector code in already-open windows.
+  The marketplace listing is https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector.
+  Keep its approved internal `name` and UUID stable; the approved display name is
+  "EDA Agent Connector" (marketplace names must not contain "easyeda"). Marketplace
+  installs can auto-update, but publishing still requires the web portal and may lag
+  GitHub releases. Sideloads do not auto-update; use the matching release package and
+  inspect `health` rather than assuming the marketplace version is current.
 - **EasyEDA schematic coords are y-UP** (+y renders upward). The orientation table
   in `skills/easyeda-agent/references/orientation.json` is the **stored-rotation** truth (the
   value `getState_Rotation` reads back for a correctly-oriented flag), validated

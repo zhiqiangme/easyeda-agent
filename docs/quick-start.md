@@ -19,7 +19,7 @@ easyeda-agent 是一套**四件套**,四者必须**同版本、同时在位**才
 ### 1. 装 CLI + Skill(一条命令)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
 ```
 
 一键脚本会：
@@ -111,7 +111,7 @@ easyeda daemon health
    开发机上的 dev 构建(git-describe 版本号)默认不覆盖 —— 这是有意的,`--force` 才强升。
    一键脚本仍是**首次安装**(和重装连接器)的路径:
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | sh
+   curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
    ```
 2. **重导连接器 `.eext`** —— EasyEDA 按 **uuid 去重**,光 bump 版本号不够:
    先在「已安装」里**卸载旧连接器**,再导入新 `.eext`(uuid 不变,原地更新)。
