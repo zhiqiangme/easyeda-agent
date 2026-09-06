@@ -371,3 +371,55 @@ func TestSchDesignatorsVerifyUsesOnlyFreshReads(t *testing.T) {
 		t.Fatalf("missing verified context: %s", out.String())
 	}
 }
+
+func TestSchDesignatorsVerifyRejectsConflictOnUnvisitedPage(t *testing.T) {
+	raw, _, target := designatorFixture(t)
+	dir := t.TempDir()
+	beforePath := filepath.Join(dir, "before.json")
+	targetPath := filepath.Join(dir, "target.json")
+	if err := os.WriteFile(beforePath, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := schDesignatorsWriteJSON(targetPath, target, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	targetRaw, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var full map[string]any
+	if err := json.Unmarshal(raw, &full); err != nil {
+		t.Fatal(err)
+	}
+	result := full["result"].(map[string]any)
+	result["components"] = append(result["components"].([]any), map[string]any{
+		"primitiveId": "p-unvisited", "componentType": "part", "designator": "U2",
+		"uniqueId": "unique-unvisited", "documentUuid": "page-unvisited",
+		"otherProperty": map[string]any{connectivity.ComponentIDProperty: "unvisited-component"},
+	})
+	fullRaw, err := json.Marshal(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, close := newAutolayoutTestDaemon(t, func(_ int, call autolayoutTestCall) string {
+		if response, ok := autolayoutTargetMetadata(call, "page1", "Page 1"); ok {
+			return response
+		}
+		if call.Action != "schematic.components.list" {
+			t.Errorf("unexpected action %s", call.Action)
+		}
+		// Model the official API's session cache: an allPages getAll alone
+		// cannot expose a conflicting component on a page never activated.
+		if call.Payload["allPages"] == true && call.Payload["tagPages"] == true {
+			return string(fullRaw)
+		}
+		return string(raw)
+	})
+	defer close()
+	window := "w1"
+	cmd := newSchDesignatorsVerifyCmd(cfg, &window, io.Discard)
+	cmd.SetArgs([]string{"--before", beforePath, "--target", targetPath, "--before-sha", sha256Hex(raw), "--target-sha", sha256Hex(targetRaw), "--phase", "before"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "unvisited-component is missing from target or duplicated") {
+		t.Fatalf("conflict on an unvisited page was not rejected: %v", err)
+	}
+}

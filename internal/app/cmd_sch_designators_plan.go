@@ -598,7 +598,9 @@ func newSchDesignatorsVerifyCmd(cfg *appConfig, window *string, stdout io.Writer
 		// Preserve standard --doc behavior: activate the existing baseline page
 		// before reading. This never creates a page or edits circuit primitives.
 		local.doc = before.Context.DocumentUUID
-		global, err := requestAction(&local, "schematic.components.list", *window, map[string]any{"allPages": true})
+		// tagPages activates every existing page: getAll alone can omit pages
+		// that this editor session has not loaded yet.
+		global, err := requestAction(&local, "schematic.components.list", *window, map[string]any{"allPages": true, "tagPages": true})
 		if err != nil {
 			return err
 		}

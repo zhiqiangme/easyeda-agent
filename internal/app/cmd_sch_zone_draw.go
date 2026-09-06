@@ -420,10 +420,9 @@ func newSchZoneDrawCmd(cfg *appConfig, window *string, stdout, stderr io.Writer)
 	c := &cobra.Command{
 		Use:   "zone-draw",
 		Short: "Draw the claimed functional zones as dashed frames + labels on the sheet (--clear removes them)",
-		Long: `Visualize the ` + "`sch zones set`" + ` claims: one dashed rectangle + "module (zone)"
-label per claim, resolved from the LIVE sheet bbox with the same geometry the
-layout-lint zone-violation rule uses — what you see is exactly what the gate
-checks (行业规范「先看区、再看线」的分区框标注).
+		Long: `Draw functional module frames from live group geometry and the sheet bbox.
+Use sch frame for explicit frame geometry, or sch compose for a complete
+data-driven Lib composition. These annotations do not establish connectivity.
 
 Frames are annotation graphics, not electrical objects. Their primitive ids are
 recorded by document UUID in the project workflow state; re-running redraws
