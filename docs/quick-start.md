@@ -30,10 +30,11 @@ curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main
 可用环境变量控制 skill 安装目标:
 
 ```bash
-EASYEDA_INSTALL_SKILLS=codex,claude  ... | sh   # 指定目标
-EASYEDA_INSTALL_SKILLS=none          ... | sh   # 跳过 skill(只装 CLI)
-EASYEDA_SKILL_PRESERVE=1             ... | sh   # 升级时保留本地改动
-EASYEDA_VERSION=v0.18.2              ... | sh   # 锁定版本,跳过 GitHub API 查询
+curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh -o install.sh
+EASYEDA_INSTALL_SKILLS=codex,claude bash install.sh  # 指定目标
+EASYEDA_INSTALL_SKILLS=none bash install.sh         # 只装 CLI
+EASYEDA_SKILL_PRESERVE=1 bash install.sh            # 保留本地内容及旧版本标记
+EASYEDA_VERSION=v1.4.2 bash install.sh              # 锁定发布版，跳过 API 查询
 ```
 
 > 装不上、报 `403`?脚本要调一次 `api.github.com` 查 latest release,匿名额度是每
@@ -47,7 +48,7 @@ EASYEDA_VERSION=v0.18.2              ... | sh   # 锁定版本,跳过 GitHub API
 easyeda daemon start        # 前台阻塞运行,Ctrl-C 退出;建议单开一个终端常驻
 ```
 
-daemon 会在端口段 `60832-60841`(`0xEDA0`-`0xEDA9`)监听,连接器会自动端口扫描并握手连上。
+daemon 默认固定监听 `60832`，连接器重试同一端口；不要额外启动多个 daemon。
 
 ### 3. 导入连接器 `.eext`
 
@@ -126,8 +127,9 @@ easyeda daemon health
 ### 自动帮你做的部分(省去手动)
 
 - **Skill 目录自动同步**:`daemon start` 默认带 `--auto-update-skill`,启动时会**后台**
-  把已存在的 skill 目录(`~/.claude`、`~/.codex`)拉齐到最新 release,并把每一步打进
-  daemon 日志。所以升级 CLI 后即便 skill 没手动更新,daemon 也会补上。尊重
+  把已存在的 Skill 目录拉齐到运行中的 CLI 发布版本，开发构建不自动写入，并把每一步打进
+  daemon 日志。客户端目录遵循 `CODEX_HOME` / `CLAUDE_CONFIG_DIR`，默认仍为
+  `~/.codex` / `~/.claude`。这是 1.4.2 安装验证后补充的修复，需随维护版本发布。尊重
   `EASYEDA_SKILL_PRESERVE=1`(保留本地改动);关掉用 `daemon start --auto-update-skill=false`。
   手动触发/查看:
   ```bash

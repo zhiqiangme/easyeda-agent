@@ -9,6 +9,8 @@ SKILL_NAME="easyeda-agent"
 INSTALL_SKILLS="${EASYEDA_INSTALL_SKILLS:-}"
 # EASYEDA_SKILL_PRESERVE=1 keeps existing files instead of clean-replacing
 SKILL_PRESERVE="${EASYEDA_SKILL_PRESERVE:-0}"
+# EASYEDA_INSTALL_DIR selects an absolute binary destination.
+# CODEX_HOME / CLAUDE_CONFIG_DIR select client config roots.
 # EASYEDA_VERSION=v0.18.2 pins the release and skips the GitHub API lookup entirely
 VERSION="${EASYEDA_VERSION:-}"
 
@@ -105,46 +107,53 @@ esac
 BINARY_NAME="easyeda_${OS}_${ARCH}"
 
 # ── choose install dir (no sudo required) ────────────────────────────────────
-if [ -w "/usr/local/bin" ]; then
+if [ -n "${EASYEDA_INSTALL_DIR:-}" ]; then
+  INSTALL_DIR="$EASYEDA_INSTALL_DIR"
+  case "$INSTALL_DIR" in /*) ;; *) fatal "EASYEDA_INSTALL_DIR must be an absolute path" ;; esac
+elif [ -w "/usr/local/bin" ]; then
   INSTALL_DIR="/usr/local/bin"
 else
   INSTALL_DIR="${HOME}/.local/bin"
-  mkdir -p "$INSTALL_DIR"
 fi
+mkdir -p "$INSTALL_DIR"
+TMP=$(mktemp -d)
+BIN_TMP=""
+trap 'rm -rf "$TMP"; [ -z "$BIN_TMP" ] || rm -f "$BIN_TMP"' EXIT
 
-# ── install CLI binary ────────────────────────────────────────────────────────
-info "Downloading ${BINARY_NAME}..."
-BIN_TMP="${INSTALL_DIR}/.easyeda-download.$$"
-curl -fsSL "${BASE_URL}/${BINARY_NAME}" -o "$BIN_TMP" \
-  || { rm -f "$BIN_TMP"; fatal "download failed: ${BASE_URL}/${BINARY_NAME}"; }
-
-# sha256 verification. Best-effort by design: releases published before
-# checksums.txt existed, and hosts without a sha256 tool, just skip it — but a
-# MISMATCH is always fatal (that is the case worth aborting for).
+# Download and validate all selected assets BEFORE changing an installed file.
+# Only HTTP 404 means an old release without checksums; network/server failures
+# must not silently disable integrity checking.
 SHA_CMD=""
 if command -v sha256sum >/dev/null 2>&1; then
   SHA_CMD="sha256sum"
 elif command -v shasum >/dev/null 2>&1; then
   SHA_CMD="shasum -a 256"
 fi
-if [ -n "$SHA_CMD" ] && SUMS=$(curl -fsSL "${BASE_URL}/checksums.txt" 2>/dev/null); then
-  WANT=$(printf '%s\n' "$SUMS" | awk -v n="$BINARY_NAME" '{ f=$2; sub(/^\*/,"",f); if (f==n) { print $1; exit } }')
-  GOT=$($SHA_CMD "$BIN_TMP" | awk '{print $1}')
-  if [ -z "$WANT" ]; then
-    warn "checksums.txt has no entry for ${BINARY_NAME} — skipping verification"
-  elif [ "$WANT" != "$GOT" ]; then
-    rm -f "$BIN_TMP"
-    fatal "checksum mismatch for ${BINARY_NAME} (want ${WANT}, got ${GOT}) — aborted, nothing installed"
-  else
-    ok "sha256 verified"
-  fi
-else
-  warn "sha256 verification skipped (no checksums.txt for ${VERSION}, or no sha256 tool)"
-fi
-
-chmod +x "$BIN_TMP"
-mv "$BIN_TMP" "${INSTALL_DIR}/easyeda"
-ok "CLI installed → ${INSTALL_DIR}/easyeda"
+SUM_CODE=$(curl -sSL --connect-timeout 15 --max-time 120 -w '%{http_code}' \
+  "${BASE_URL}/checksums.txt" -o "$TMP/checksums.txt") || fatal "Could not download checksums.txt"
+case "$SUM_CODE" in
+  200) [ -n "$SHA_CMD" ] || fatal "Install sha256sum or shasum to verify this release" ;;
+  404) warn "Old release has no checksums.txt; binary version and Skill metadata will be checked" ;;
+  *) fatal "checksums.txt returned HTTP $SUM_CODE; nothing installed" ;;
+esac
+verify_asset() {
+  _name="$1"; _path="$2"
+  [ "$SUM_CODE" = 200 ] || return 0
+  _want=$(awk -v n="$_name" '{ f=$2; sub(/^\*/,"",f); if (f==n) print $1 }' "$TMP/checksums.txt")
+  [ "${#_want}" = 64 ] || fatal "Missing/duplicate/invalid checksum for $_name"
+  case "$_want" in *[!0-9a-fA-F]*) fatal "Invalid checksum for $_name" ;; esac
+  _got=$($SHA_CMD "$_path" | awk '{print $1}')
+  [ "$_want" = "$_got" ] || fatal "checksum mismatch for $_name; nothing installed"
+  ok "sha256 verified: $_name"
+}
+info "Downloading ${BINARY_NAME}..."
+curl -fsSL --connect-timeout 15 --max-time 300 "${BASE_URL}/${BINARY_NAME}" -o "$TMP/binary" \
+  || fatal "download failed: ${BASE_URL}/${BINARY_NAME}"
+verify_asset "$BINARY_NAME" "$TMP/binary"
+chmod 0755 "$TMP/binary"
+ACTUAL_VERSION=$("$TMP/binary" --version) || fatal "Downloaded binary cannot run on this host; nothing installed"
+[ "$ACTUAL_VERSION" = "easyeda-agent $VERSION" ] \
+  || fatal "Downloaded binary version differs: $ACTUAL_VERSION; expected $VERSION"
 
 # ── install skills (Codex + Claude Code) ──────────────────────────────────────
 # Resolve which clients to install for.
@@ -166,10 +175,10 @@ detect_targets() {
 
   # auto-detect
   found=0
-  if [ -d "${HOME}/.codex" ] || command -v codex >/dev/null 2>&1; then
+  if [ -d "${CODEX_HOME:-${HOME}/.codex}" ] || command -v codex >/dev/null 2>&1; then
     printf 'codex\n'; found=1
   fi
-  if [ -d "${HOME}/.claude" ] || command -v claude >/dev/null 2>&1; then
+  if [ -d "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}" ] || command -v claude >/dev/null 2>&1; then
     printf 'claude\n'; found=1
   fi
   # Neither detected → create both by default so the skill is ready when a
@@ -184,71 +193,93 @@ detect_targets() {
 # Map a client name to its skills base dir.
 client_base_dir() {
   case "$1" in
-    codex)  printf '%s/.codex/skills\n' "$HOME" ;;
-    claude) printf '%s/.claude/skills\n' "$HOME" ;;
+    codex)  printf '%s/skills\n' "${CODEX_HOME:-${HOME}/.codex}" ;;
+    claude) printf '%s/skills\n' "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}" ;;
     *)      return 1 ;;
   esac
 }
 
-# install_skill_to <client> <src_skill_dir>
-# Cleanly replaces <base>/easyeda-agent from the release (no backup to avoid polluting the skills dir).
+# Stage on the destination filesystem and swap only a complete directory. On a
+# failed switch, restore the previous directory. Preserve mode reports mixed
+# content and keeps the old marker instead of claiming a complete upgrade.
 install_skill_to() {
   _client="$1"; _src="$2"
-  _base=$(client_base_dir "$_client") || { warn "Unknown skill target: ${_client} (skipped)"; return 0; }
+  _base=$(client_base_dir "$_client") || fatal "Unknown skill target: $_client"
+  case "$_base" in /*) ;; *) fatal "Client config directory must be absolute: $_base" ;; esac
   mkdir -p "$_base"
   _dest="${_base}/${SKILL_NAME}"
-
-  # Records the installed version so the daemon's startup skill-sync knows this
-  # dir is already current and skips a needless re-download (see `easyeda skill`).
-  _write_marker() { printf '%s\n' "${VERSION#v}" > "${_dest}/.version"; }
-
-  if [ ! -d "$_dest" ]; then
-    cp -r "$_src" "$_dest"
-    _write_marker
-    ok "${_client} skill installed → ${_dest}"
-    return 0
+  if [ -L "$_dest" ]; then
+    _dest=$(cd "$_dest" && pwd -P) || fatal "Skill symlink target is unavailable"
+    _base=$(dirname "$_dest")
   fi
-
-  if [ "$SKILL_PRESERVE" = "1" ]; then
-    cp -rn "$_src"/. "$_dest"/ 2>/dev/null || cp -r "$_src"/. "$_dest"/
-    _write_marker
-    ok "${_client} skill updated (preserve mode, existing files kept) → ${_dest}"
-    return 0
+  _stage=$(mktemp -d "${_base}/.easyeda-stage.XXXXXX")
+  if ! cp -R "$_src"/. "$_stage"/; then
+    rm -rf "$_stage"; fatal "Could not stage $_client Skill; existing files kept"
   fi
-
-  # Detect local modifications vs the release; clean-replace if different.
-  if diff -r "$_src" "$_dest" >/dev/null 2>&1; then
-    _write_marker
-    ok "${_client} skill already up to date → ${_dest}"
-    return 0
+  _preserved=0
+  if [ "$SKILL_PRESERVE" = 1 ] && [ -d "$_dest" ]; then
+    if ! cp -R "$_dest"/. "$_stage"/; then
+      rm -rf "$_stage"; fatal "Could not preserve $_client Skill; existing files kept"
+    fi
+    _preserved=1
+  else
+    printf '%s\n' "${VERSION#v}" > "$_stage/.version"
   fi
-  rm -rf "$_dest"
-  cp -r "$_src" "$_dest"
-  _write_marker
-  ok "${_client} skill updated → ${_dest}"
+  _backup="$_stage.previous"
+  if [ -e "$_dest" ]; then
+    if ! mv "$_dest" "$_backup"; then
+      rm -rf "$_stage"; fatal "Could not back up $_client Skill; existing files kept"
+    fi
+  fi
+  if ! mv "$_stage" "$_dest"; then
+    if [ -e "$_backup" ]; then mv "$_backup" "$_dest" || fatal "Restore $_backup to $_dest"; fi
+    rm -rf "$_stage"; fatal "Could not install $_client Skill"
+  fi
+  rm -rf "$_backup"
+  if [ "$_preserved" = 1 ]; then
+    warn "$_client Skill preserved (mixed local/release content; previous version marker kept) → $_dest"
+  else
+    ok "$_client Skill installed → $_dest"
+  fi
 }
 
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-
 TARGETS=$(detect_targets)
+# Reject bad client names/paths before changing the CLI or any Skill directory.
+for client in $TARGETS; do
+  CLIENT_BASE=$(client_base_dir "$client") || fatal "Unknown skill target: $client"
+  case "$CLIENT_BASE" in /*) ;; *) fatal "Client config directory must be absolute: $CLIENT_BASE" ;; esac
+  if [ -L "$CLIENT_BASE/$SKILL_NAME" ]; then
+    [ -d "$CLIENT_BASE/$SKILL_NAME" ] || fatal "Skill symlink target is unavailable: $CLIENT_BASE/$SKILL_NAME"
+  fi
+done
 if [ -z "$TARGETS" ]; then
   info "Skill install skipped (EASYEDA_INSTALL_SKILLS=none)"
 else
   info "Downloading skills.tar.gz..."
-  curl -fsSL "${BASE_URL}/skills.tar.gz" | tar -xzf - -C "$TMP"
-  SRC_SKILL="${TMP}/${SKILL_NAME}"
-  [ -d "$SRC_SKILL" ] || fatal "skills.tar.gz did not contain ${SKILL_NAME}/"
-  printf '%s\n' "$TARGETS" | while IFS= read -r client; do
-    [ -n "$client" ] && install_skill_to "$client" "$SRC_SKILL"
-  done
+  curl -fsSL --connect-timeout 15 --max-time 300 "${BASE_URL}/skills.tar.gz" -o "$TMP/skills.tar.gz" \
+    || fatal "Skill download failed; nothing installed"
+  verify_asset "skills.tar.gz" "$TMP/skills.tar.gz"
+  tar -xzf "$TMP/skills.tar.gz" -C "$TMP" || fatal "Invalid Skill archive; nothing installed"
+  SRC_SKILL="$TMP/$SKILL_NAME"
+  [ -s "$SRC_SKILL/SKILL.md" ] || fatal "Skill archive has no SKILL.md; nothing installed"
+  SKILL_VERSION=$(sed -n 's/^  version: *"\([^"]*\)" *$/\1/p' "$SRC_SKILL/SKILL.md")
+  [ "$SKILL_VERSION" = "${VERSION#v}" ] || fatal "Skill metadata version differs from $VERSION; nothing installed"
 fi
+BIN_TMP=$(mktemp "${INSTALL_DIR}/.easyeda-download.XXXXXX")
+cp "$TMP/binary" "$BIN_TMP"
+chmod 0755 "$BIN_TMP"
+mv "$BIN_TMP" "${INSTALL_DIR}/easyeda"
+BIN_TMP=""
+ok "CLI installed → ${INSTALL_DIR}/easyeda"
+for client in $TARGETS; do
+  install_skill_to "$client" "$SRC_SKILL"
+done
 
 # ── PATH check ────────────────────────────────────────────────────────────────
 if ! echo ":${PATH}:" | grep -q ":${INSTALL_DIR}:"; then
   warn "${INSTALL_DIR} is not in PATH"
   printf '    Add to ~/.zshrc or ~/.bashrc:\n'
-  printf '    export PATH="$PATH:%s"\n\n' "$INSTALL_DIR"
+  printf '    export PATH="%s:$PATH"\n\n' "$INSTALL_DIR"
 fi
 
 # ── next steps ────────────────────────────────────────────────────────────────
