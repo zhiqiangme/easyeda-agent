@@ -17,6 +17,7 @@ type schDesignInput struct {
 	drawing        map[string]any
 	kind           string
 	missingDrawing []connectivity.DesignUnverified
+	modulesPresent bool
 }
 
 func decodeSchDesignInput(raw []byte) (schDesignInput, error) {
@@ -27,10 +28,16 @@ func decodeSchDesignInput(raw []byte) (schDesignInput, error) {
 	}
 	cRaw, hasEnvelope := root["connectivity"]
 	if !hasEnvelope {
+		_, result.modulesPresent = root["modules"]
 		e, err := connectivity.DecodeDesignEvidence(raw)
 		result.canonical, result.kind = e, "canonical"
 		return result, err
 	}
+	var canonicalFields map[string]json.RawMessage
+	if err := json.Unmarshal(cRaw, &canonicalFields); err != nil {
+		return result, err
+	}
+	_, result.modulesPresent = canonicalFields["modules"]
 	if _, hasPlan := root["layout"]; hasPlan {
 		var p schCompositionPlan
 		if err := connectivity.DecodeStrictDesignJSON(raw, &p); err != nil {
@@ -286,7 +293,7 @@ func enrichSchDesignPlanGeometry(raw []byte, p schCompositionPlan) ([]byte, erro
 				return nil, fmt.Errorf("%s.%s drawing pin identity/net disagrees with canonical", ref, number)
 			}
 			for k, v := range map[string]float64{"x": drawn.X, "y": drawn.Y} {
-				if old, exists := pin[k]; exists && old != v {
+				if old, exists := pin[k]; exists && normalizeSchDesignDrawingNumbers(old) != connectivity.NormalizeDesignNumber(v) {
 					return nil, fmt.Errorf("%s.%s canonical/drawing %s disagree", ref, number, k)
 				}
 				pin[k] = v
@@ -317,7 +324,7 @@ func enrichSchDesignPlanGeometry(raw []byte, p schCompositionPlan) ([]byte, erro
 						newVal = false
 					}
 				}
-				if !reflect.DeepEqual(v, newVal) {
+				if !reflect.DeepEqual(normalizeSchDesignDrawingNumbers(v), normalizeSchDesignDrawingNumbers(newVal)) {
 					return nil, fmt.Errorf("%s canonical/drawing placement %s disagree", ref, k)
 				}
 			}
@@ -395,8 +402,8 @@ func schDesignDrawingState(p schCompositionPlan) (map[string]any, error) {
 	return state, nil
 }
 
-// Normalize IEEE signed zero once on our private decoded map. Equal values
-// then have equal JSON content hashes without mutating evidence during compare.
+// Normalize numbers before sorting/reversing drawing collections. Canonical
+// and drawing comparisons share one precision and content-hash contract.
 func normalizeSchDesignDrawingNumbers(value any) any {
 	switch v := value.(type) {
 	case map[string]any:
@@ -408,9 +415,7 @@ func normalizeSchDesignDrawingNumbers(value any) any {
 			v[i] = normalizeSchDesignDrawingNumbers(item)
 		}
 	case float64:
-		if v == 0 {
-			return float64(0)
-		}
+		return connectivity.NormalizeDesignNumber(v)
 	}
 	return value
 }
@@ -466,10 +471,57 @@ func compareSchDesignInputs(a, b schDesignInput) (connectivity.DesignDiff, error
 		}
 	} else {
 		diff.Coverage.Unverified[0].Reason = fmt.Sprintf("drawing comparison requires two complete compose plans; received %s and %s; only shared canonical content was compared", a.kind, b.kind)
+		markSchDesignReadbackCoverage(a, b, &diff)
 	}
 	connectivity.SortDesignChanges(diff.Changes)
 	return diff, nil
 }
+
+// Canonical exports establish pin-to-net state, but can omit authored modules
+// and report a connection's provenance as netlist rather than its drawn marker
+// type. Missing evidence is not a deletion or a contrary drawing observation.
+// Keep complete local plan comparisons strict, including explicit modules: [].
+func markSchDesignReadbackCoverage(a, b schDesignInput, diff *connectivity.DesignDiff) {
+	var observed schDesignInput
+	side := ""
+	if a.kind == "compose-plan" && (b.kind == "canonical" || b.kind == "connectivity-envelope") {
+		observed, side = b, "actual"
+	} else if b.kind == "compose-plan" && (a.kind == "canonical" || a.kind == "connectivity-envelope") {
+		observed, side = a, "expected"
+	} else {
+		return
+	}
+	unverified := []connectivity.DesignUnverified{}
+	if !observed.modulesPresent {
+		for _, path := range []string{"/modules", "/moduleOrder"} {
+			unverified = append(unverified, connectivity.DesignUnverified{Side: side, Path: path, Reason: "canonical readback omitted authored modules; absence does not prove an empty module inventory or reading order"})
+		}
+	}
+	changes := make([]connectivity.DesignChange, 0, len(diff.Changes))
+	for _, change := range diff.Changes {
+		if !observed.modulesPresent && change.Domain == "module" {
+			continue
+		}
+		value := change.After
+		if side == "expected" {
+			value = change.Before
+		}
+		if change.Domain == "connection" && strings.HasSuffix(change.Path, "/kind") && value == "netlist" {
+			unverified = append(unverified, connectivity.DesignUnverified{Side: side, Path: change.Path, Reason: "netlist proves pin-to-net membership but does not establish the intended wire or marker drawing kind"})
+			continue
+		}
+		changes = append(changes, change)
+	}
+	diff.Changes = changes
+	if len(unverified) != 0 {
+		diff.Coverage.Unverified = append(diff.Coverage.Unverified, unverified...)
+		diff.Coverage.CanonicalComplete = false
+		if diff.Status != "wrong-target" {
+			diff.Status = "incomplete"
+		}
+	}
+}
+
 func schFullDesignRevision(canonical string, drawing map[string]any) (string, error) {
 	raw, err := json.Marshal(map[string]any{"canonicalRevision": canonical, "drawing": drawing})
 	if err != nil {

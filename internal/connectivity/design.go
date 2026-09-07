@@ -10,6 +10,7 @@ import (
 	"math"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -240,7 +241,7 @@ func DecodeDesignEvidence(raw []byte) (DesignEvidence, error) {
 			e.checkCoordinates(pin, target["pins"].(map[string]any)[number].(map[string]any), append(path, "pins", number), []string{"x", "y"})
 		}
 	}
-	e.state = normalizeDesignZero(e.state).(map[string]any)
+	e.state = normalizeDesignNumbers(e.state).(map[string]any)
 	return e, nil
 }
 
@@ -375,7 +376,8 @@ func canonicalDesignState(input Document) (map[string]any, error) {
 	nc := map[[2]string]bool{}
 	unconnected := map[[2]string]bool{}
 	connected := map[[2]string]string{}
-	for _, c := range d.Components {
+	for i := range d.Components {
+		c := &d.Components[i]
 		if strings.TrimSpace(c.ID) == "" || strings.TrimSpace(c.Ref) == "" {
 			return nil, fmt.Errorf("component id/ref must not be blank")
 		}
@@ -393,6 +395,11 @@ func canonicalDesignState(input Document) (map[string]any, error) {
 		}
 		if d.DocumentID != "" && c.PageID != "" && c.PageID != d.DocumentID {
 			return nil, fmt.Errorf("%s pageId disagrees with documentId", c.ID)
+		}
+		// A single-page snapshot's document identity is sufficient evidence for
+		// its omitted component page. Never infer page membership without it.
+		if c.PageID == "" && d.DocumentID != "" {
+			c.PageID = d.DocumentID
 		}
 		if c.Placement != nil {
 			p := c.Placement
@@ -523,7 +530,7 @@ func canonicalDesignState(input Document) (map[string]any, error) {
 		m := record.(map[string]any)
 		m["ports"] = designKeyedRecords(m["ports"], "id")
 	}
-	return normalizeDesignZero(state).(map[string]any), nil
+	return normalizeDesignNumbers(state).(map[string]any), nil
 }
 func designFinite(values ...float64) bool {
 	for _, v := range values {
@@ -552,20 +559,33 @@ func designKeyedRecords(value any, key string) map[string]any {
 	}
 	return out
 }
-func normalizeDesignZero(value any) any {
+
+// NormalizeDesignNumber removes API arithmetic tails at a fixed 1e-9 raw
+// resolution, far below the drawing grid and Apply's 1e-6 tolerance. Fixed
+// decimal formatting avoids multiplication overflow and is idempotent even
+// for large finite coordinates. Comparison and revision hashes use the same
+// normalization; this is quantization, not a pairwise epsilon comparison.
+func NormalizeDesignNumber(value float64) float64 {
+	text := strconv.FormatFloat(value, 'f', 9, 64)
+	normalized, _ := strconv.ParseFloat(text, 64)
+	if normalized == 0 {
+		return 0 // IEEE signed zero has the same meaning and hash.
+	}
+	return normalized
+}
+
+func normalizeDesignNumbers(value any) any {
 	switch v := value.(type) {
 	case map[string]any:
 		for key, item := range v {
-			v[key] = normalizeDesignZero(item)
+			v[key] = normalizeDesignNumbers(item)
 		}
 	case []any:
 		for i, item := range v {
-			v[i] = normalizeDesignZero(item)
+			v[i] = normalizeDesignNumbers(item)
 		}
 	case float64:
-		if v == 0 {
-			return float64(0)
-		}
+		return NormalizeDesignNumber(v)
 	}
 	return value
 }

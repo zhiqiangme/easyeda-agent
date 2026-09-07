@@ -21,6 +21,8 @@ func newSchDesignDiffCmd(stdout, stderr io.Writer) *cobra.Command {
 Two complete compose plans also compare sheet, keepouts, placements, wires, flags,
 frames, title styling and modeled occupancy. Plans are local intent, not proof of
 actual EDA drawing. A plan versus canonical readback compares canonical data only.
+Omitted readback modules and netlist-only evidence for a requested drawing kind
+are unverified/incomplete, not module deletion or proof of a different marker.
 
 With --playbook, the first input is the BEFORE baseline plan and the second is
 the AFTER desired plan. --before requires a fresh target sch list snapshot with
@@ -33,6 +35,8 @@ then checks the desired result and saves. Equal plans compile read-only checks.
 Stable component/pin/net IDs determine matches; inventory ordering is ignored.
 Module reading order and wire path shape remain meaningful; reversing an entire
 wire path is equivalent. Derived issues and runtime primitiveId are ignored. Missing coordinate evidence remains unverified, never an observed zero.
+Single-page documentId supplies an omitted component pageId. Numbers use nine
+decimal places for both comparison and hashing, not drawing-grid snapping.
 Hashes cover normalized content within coverage.scope; only equal covered data
 is "synced". Missing drawing evidence is always reported, even if canonical data
 matches. Use fresh EDA readback and frame check/export-image to verify the editor.

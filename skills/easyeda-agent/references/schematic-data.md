@@ -71,6 +71,11 @@ FOOTPRINT `DOCHEAD` 和唯一 `META.source` 证明实例封装到库资产的出
 计划还可比较导线、标记、框与标题；只提供 canonical 数据时这些图形必须列为未验证，
 不能把导出中未包含的字段当作“相同”。新命令属于后续源码，原发布版 1.4.2 不含此能力。
 `status` 为 `synced` / `different` / `wrong-target` / `incomplete`。
+单页顶层 `documentId` 可确定省略的器件 `pageId`；跨页缺归属或显式冲突不能据此补齐。
+对账与修订哈希统一按小数点后 9 位规范化数值，只去除 API 浮点尾差，不按 5 raw 网格吸附；
+真实亚网格位移仍会报告。计划与 canonical 回读比较时，未导出的模块/顺序及仅由 `netlist`
+证明连接、未证明绘制方式的 `kind` 列入 `coverage.unverified`，结果为 `incomplete`，不当作模块删除或全量同步。
+两份完整计划仍比较模块、顺序和连接绘制方式。
 `expectedRevision/actualRevision` 是 `coverage.scope` 内规范化内容的哈希；运行态 primitiveId、
 库存数组顺序和整条导线的正反遍历不计差异，模块阅读顺序及实际折线路径会比较。
 退出码：0 表示比较执行完；有 `--exit-code` 且内容不同为 2；目标不符或 canonical 证据不完整为 3；
