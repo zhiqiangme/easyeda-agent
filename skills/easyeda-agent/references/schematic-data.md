@@ -48,6 +48,7 @@ FOOTPRINT `DOCHEAD` 和唯一 `META.source` 证明实例封装到库资产的出
 | 读取连接图 | `sch connectivity [--page <page> | --all-pages]`；跨页导出逐页激活读取，避免只取得浅层引脚信息。 |
 | 本地连接差异 | `sch connectivity-diff before.json after.json`；检查组件/网络增删、连接及 NC 差异，不代替器件库身份与几何校验。 |
 | 本地设计版本差异 | `sch design-diff expected.json actual.json --exit-code`；比较 canonical 或完整 compose 计划，输出稳定 ID 差异、修订哈希和证据覆盖范围。 |
+| 既有框/标题的差异 Apply | `sch design-diff before-plan.json after-plan.json --before fresh.json --playbook frame-diff-apply.json`；第一份是已落地基线，第二份是期望目标，只编译变化的既有 owned frames。 |
 | 从实测引脚计算 Lib 内部 | `sch lib-layout --from layout-input.json --out composition.json`；核心与外围的连接图、实测姿态及网络绘制策略 → 局部器件位置/短线/标记，再交给 compose。 |
 | 非标准位号修复 | `sch designators allocate` 分配，`plan` 编译原地修改队列，`verify` 执行前后校验。 |
 | 完整 Lib 图面 | `sch compose`：完整连接核心与局部几何 → 单页布局与受保护 Apply。 |
@@ -73,6 +74,25 @@ FOOTPRINT `DOCHEAD` 和唯一 `META.source` 证明实例封装到库资产的出
 easyeda sch design-diff target-plan.json observed-connectivity.json --exit-code
 easyeda sch design-diff previous-plan.json next-plan.json --exit-code
 ```
+
+仅修改已由本工具登记的模块框/标题时，可编译有界增量队列：
+
+```bash
+easyeda sch list --project <project> --page <page> --stay \
+  --include-device-identity --include-bbox --include-pins --include-wires > fresh.json
+easyeda sch design-diff before-plan.json after-plan.json \
+  --before fresh.json --playbook frame-diff-apply.json > frame-diff-report.json
+easyeda sch apply frame-diff-apply.json --dry-run
+easyeda sch apply frame-diff-apply.json --yes
+```
+
+两份输入必须是完整 compose 计划，`fresh.json` 必须与第一份基线的器件、库身份、
+引脚、NC、导线及标记一致。队列再次核对实际电气图和基线框的所有权/外观，
+只更新有变化的框，再检查目标框和未变的电气图，最后保存。相同计划只生成只读检查，
+不调用 frame apply 或 save。框仍使用虚线；标题修改必须保留有效的内容占位和净距。
+本入口不新增、删除、重排框，不修改电气/器件/导线/标记，也不接受规划诊断或电路
+占位数据的变更；这些差异明确拒绝编译，不能作为通用 patch 使用。未知所有权或现场
+已偏离基线时停止；部分执行后须回读并重新确定基线，不能跳过前置检查重试旧队列。
 
 模块局部坐标与整页坐标不同，现场应对照 `compose` 输出的目标坐标，不能直接比较源局部坐标。
 
