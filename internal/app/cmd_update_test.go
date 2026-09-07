@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -45,6 +46,9 @@ func TestCheckCLIVerdicts(t *testing.T) {
 func TestCheckSkillsReadsVersionMarkers(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	claude := filepath.Join(home, ".claude", "skills", "easyeda-agent")
 	if err := os.MkdirAll(claude, 0o755); err != nil {
 		t.Fatal(err)
@@ -148,6 +152,9 @@ func TestProbeConnectorNoDaemonIsNotAnError(t *testing.T) {
 func TestUpdateCheckExitCodeGate(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	claude := filepath.Join(home, ".claude", "skills", "easyeda-agent")
 	if err := os.MkdirAll(claude, 0o755); err != nil {
 		t.Fatal(err)
@@ -193,5 +200,102 @@ func TestUpdateRejectsConflictingScopeFlags(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "mutually exclusive") {
 		t.Errorf("stderr should explain the conflict: %q", stderr.String())
+	}
+}
+
+func TestUpdateFailedSkillSyncHasNonzeroExit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"update", "--skill-only", "--client", "typo", "--version", "1.4.2", "--ports", "1-1", "--json"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("failed update returned %d: %s %s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "unknown skill client") {
+		t.Fatalf("missing client diagnostic: %s", stderr.String())
+	}
+}
+
+type updateFailureTransport struct{ paths []string }
+
+func (r *updateFailureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.paths = append(r.paths, req.URL.Path)
+	return &http.Response{StatusCode: http.StatusServiceUnavailable, Status: "503 Service Unavailable", Header: make(http.Header), Body: io.NopCloser(strings.NewReader("offline fixture")), Request: req}, nil
+}
+
+func TestUpdateFailedCLIDoesNotUpgradeSkill(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	dir := filepath.Join(home, ".codex", "skills", "easyeda-agent")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".version"), []byte("1.4.1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	transport := &updateFailureTransport{}
+	oldClient := http.DefaultClient
+	http.DefaultClient = &http.Client{Transport: transport}
+	oldVersion := version.Version
+	version.Version = "v1.4.1"
+	t.Cleanup(func() { http.DefaultClient = oldClient; version.Version = oldVersion })
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"update", "--version", "1.4.2", "--ports", "1-1", "--json"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("CLI failure returned %d: %s %s", code, stdout.String(), stderr.String())
+	}
+	var report updateReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.CLI == nil || report.CLI.Status != "error" {
+		t.Fatalf("missing CLI failure: %+v", report)
+	}
+	for _, path := range transport.paths {
+		if strings.HasSuffix(path, "skills.tar.gz") {
+			t.Fatalf("downloaded Skill despite CLI failure: %v", transport.paths)
+		}
+	}
+	marker, _ := os.ReadFile(filepath.Join(dir, ".version"))
+	if string(marker) != "1.4.1\n" {
+		t.Fatal("Skill changed on CLI failure")
+	}
+}
+
+func TestPreservedSkillReportDoesNotClaimCurrent(t *testing.T) {
+	report := updateReport{Target: "1.4.2", Skills: []updateSkillRow{{Client: "codex", Status: "preserved", Installed: "1.4.1"}}}
+	if countBehind(report) != 1 {
+		t.Fatal("preserved stale Skill was reported current")
+	}
+	notes := strings.Join(updateNotes(report), " ")
+	if !strings.Contains(notes, "parity is not claimed") {
+		t.Fatalf("missing preservation explanation: %s", notes)
+	}
+}
+
+func TestUpdateCheckRejectsUnknownClientAndRelativeHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	var stdout, stderr bytes.Buffer
+	args := []string{"update", "--check", "--skill-only", "--version", "1.4.2", "--ports", "1-1", "--json", "--exit-code"}
+	code := Run(append(args, "--client", "typo"), &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "unknown skill client") {
+		t.Fatalf("unknown client returned %d: %s", code, stderr.String())
+	}
+	t.Setenv("CODEX_HOME", "relative/codex")
+	stdout.Reset()
+	stderr.Reset()
+	code = Run(append(args, "--client", "codex"), &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "absolute") {
+		t.Fatalf("relative client home returned %d: %s", code, stderr.String())
 	}
 }

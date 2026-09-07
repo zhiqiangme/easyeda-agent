@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -259,7 +260,7 @@ func TestUpdateCLIBadTargetVersion(t *testing.T) {
 
 func TestFetchChecksumParsesShasumFormat(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, "aaa  easyeda_linux_amd64\nbbb  *easyeda_darwin_arm64\nnot-a-line\n")
+		fmt.Fprintf(w, "%s  easyeda_linux_amd64\n%s  *easyeda_darwin_arm64\nnot-a-line\n", strings.Repeat("a", 64), strings.Repeat("b", 64))
 	}))
 	defer srv.Close()
 	old := checksumsURL
@@ -270,11 +271,11 @@ func TestFetchChecksumParsesShasumFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchChecksum: %v", err)
 	}
-	if got != "bbb" {
-		t.Errorf("checksum=%q want bbb", got)
+	if got != strings.Repeat("b", 64) {
+		t.Errorf("checksum=%q want 64 b characters", got)
 	}
 	if _, err := fetchChecksum(context.Background(), "0.26.0", "easyeda_windows_amd64.exe"); err == nil {
-		t.Error("a missing asset entry must error so the caller skips verification")
+		t.Error("a missing asset entry must fail verification")
 	}
 }
 
@@ -290,5 +291,34 @@ func assertNoLeftovers(t *testing.T, dir string) {
 		if len(e.Name()) > 1 && e.Name()[0] == '.' {
 			t.Errorf("leftover temp file in install dir: %s", e.Name())
 		}
+	}
+}
+
+func TestVerifyBinaryRequiresExactVersion(t *testing.T) {
+	for _, tc := range []struct {
+		output string
+		ok     bool
+	}{
+		{"easyeda-agent v1.4.2\n", true}, {"easyeda-agent 1.4.2", true},
+		{"easyeda-agent v1.4.20", false}, {"easyeda-agent v11.4.2", false},
+		{"easyeda-agent v1.4.2-1-g123", false}, {"wrong-app 1.4.2", false},
+		{"old output\neasyeda-agent v1.4.2", false},
+	} {
+		if got := validVersionOutput(tc.output, "1.4.2"); got != tc.ok {
+			t.Errorf("output %q: got %v, want %v", tc.output, got, tc.ok)
+		}
+	}
+}
+
+func TestFetchChecksumRejectsDuplicateEntries(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, "%s  skills.tar.gz\n%s  skills.tar.gz\n", strings.Repeat("a", 64), strings.Repeat("b", 64))
+	}))
+	defer srv.Close()
+	old := checksumsURL
+	checksumsURL = func(string) string { return srv.URL }
+	t.Cleanup(func() { checksumsURL = old })
+	if _, err := fetchChecksum(context.Background(), "1.4.2", "skills.tar.gz"); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("duplicate checksums were accepted: %v", err)
 	}
 }

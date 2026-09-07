@@ -16,6 +16,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,10 +50,15 @@ var verifyBinary = func(ctx context.Context, path, want string) error {
 		return fmt.Errorf("downloaded binary failed to run (%v): %s", err, strings.TrimSpace(string(out)))
 	}
 	got := strings.TrimSpace(string(out))
-	if !strings.Contains(got, want) {
+	if !validVersionOutput(got, want) {
 		return fmt.Errorf("downloaded binary reports %q, expected version %s", got, want)
 	}
 	return nil
+}
+
+func validVersionOutput(output, want string) bool {
+	got := strings.TrimSpace(output)
+	return got == "easyeda-agent v"+want || got == "easyeda-agent "+want
 }
 
 // AssetName maps a Go platform onto the release asset name published by
@@ -188,9 +194,13 @@ func UpdateCLI(ctx context.Context, opts CLIOptions, logf func(string, ...any)) 
 	// releases built after it was added, so a missing file must not block an
 	// upgrade from an older release.
 	switch want, err := fetchChecksum(ctx, target, asset); {
-	case err != nil:
+	case errors.Is(err, errChecksumUnavailable):
 		out.Checksum = "unavailable"
 		log("update: checksum unavailable (%v) — falling back to a run-and-verify check", err)
+	case err != nil:
+		out.Status = "error"
+		out.Reason = err.Error()
+		return out, fmt.Errorf("verify checksum for %s: %w", asset, err)
 	case !strings.EqualFold(want, sum):
 		out.Status = "error"
 		out.Reason = fmt.Sprintf("checksum mismatch: want %s, got %s", want, sum)
@@ -279,9 +289,11 @@ func downloadTo(ctx context.Context, url, dir string, mode os.FileMode) (path, s
 	return tmp, hex.EncodeToString(h.Sum(nil)), nil
 }
 
+var errChecksumUnavailable = errors.New("release has no checksums.txt (HTTP 404)")
+
 // fetchChecksum pulls checksums.txt for the release and returns the sha256 hex
-// recorded for asset. Errors (including "no such asset published") are the
-// caller's cue to skip checksum verification.
+// recorded for asset. Only HTTP 404 permits the legacy-release fallback;
+// network failures, malformed manifests, and missing asset entries fail closed.
 func fetchChecksum(ctx context.Context, version, asset string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumsURL(version), nil)
 	if err != nil {
@@ -293,23 +305,34 @@ func fetchChecksum(ctx context.Context, version, asset string) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			return "", errChecksumUnavailable
+		}
 		return "", fmt.Errorf("checksums.txt: %s", resp.Status)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return "", err
 	}
+	var found string
 	for line := range strings.SplitSeq(string(body), "\n") {
-		// sha256sum/shasum format: "<hex>  <name>" (also tolerate "*name").
 		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) != 2 {
+		if len(fields) != 2 || strings.TrimPrefix(fields[1], "*") != asset {
 			continue
 		}
-		if strings.TrimPrefix(fields[1], "*") == asset {
-			return fields[0], nil
+		if found != "" {
+			return "", fmt.Errorf("duplicate checksum entry for %s", asset)
 		}
+		decoded, err := hex.DecodeString(fields[0])
+		if err != nil || len(decoded) != sha256.Size {
+			return "", fmt.Errorf("invalid sha256 for %s", asset)
+		}
+		found = fields[0]
 	}
-	return "", fmt.Errorf("no checksum entry for %s", asset)
+	if found == "" {
+		return "", fmt.Errorf("no checksum entry for %s", asset)
+	}
+	return found, nil
 }
 
 // replaceBinary moves tmp onto dst. On Unix a rename over a running executable

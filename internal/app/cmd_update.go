@@ -44,7 +44,7 @@ type updateSkillRow struct {
 	From      string `json:"from,omitempty"`      // version before this run (apply mode)
 	Installed string `json:"installed,omitempty"` // version on disk after this run
 	Present   bool   `json:"present"`
-	Status    string `json:"status"` // behind | current | not-installed | updated | created | skipped | error
+	Status    string `json:"status"` // behind | current | not-installed | updated | created | preserved | skipped | error
 	Err       string `json:"err,omitempty"`
 }
 
@@ -101,10 +101,17 @@ If the binary lives in a root-owned dir, re-run with sudo.`,
 			if cliOnly && skillOnly {
 				return fmt.Errorf("--cli-only and --skill-only are mutually exclusive")
 			}
+			clients = normalizeClients(clients)
+			if !cliOnly || len(clients) > 0 {
+				if err := selfupdate.ValidateClients(clients); err != nil {
+					return err
+				}
+			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 120*time.Second)
 			defer cancel()
 
 			rep := updateReport{Mode: "apply", CLIVersion: version.Version}
+			operationFailed := false
 			if checkOnly {
 				rep.Mode = "check"
 			}
@@ -142,14 +149,17 @@ If the binary lives in a root-owned dir, re-run with sudo.`,
 						Force:          force,
 					}, func(format string, a ...any) { fmt.Fprintf(stderr, format+"\n", a...) })
 					rep.CLI = &outcome
-					if err != nil && !jsonOut {
-						fmt.Fprintf(stderr, "cli update failed: %v\n", err)
+					if err != nil {
+						operationFailed = true
+						if !jsonOut {
+							fmt.Fprintf(stderr, "cli update failed: %v\n", err)
+						}
 					}
 				}
 			}
 
 			// ── skill dirs ───────────────────────────────────────────────────
-			if !cliOnly {
+			if !cliOnly && !operationFailed {
 				if checkOnly {
 					rep.Skills = checkSkills(target, normalizeClients(clients))
 				} else {
@@ -183,19 +193,28 @@ If the binary lives in a root-owned dir, re-run with sudo.`,
 						}
 						rep.Skills = append(rep.Skills, row)
 					}
-					if err != nil && !jsonOut {
-						fmt.Fprintf(stderr, "skill sync: %v\n", err)
+					if err != nil {
+						operationFailed = true
+						if !jsonOut {
+							fmt.Fprintf(stderr, "skill sync: %v\n", err)
+						}
 					}
 				}
 			}
 
 			rep.Behind = countBehind(rep)
 			rep.Notes = updateNotes(rep)
+			if !cliOnly && rep.CLI != nil && rep.CLI.Status == "error" {
+				rep.Notes = append(rep.Notes, "Skill update skipped because the CLI update failed.")
+			}
 
 			if jsonOut {
 				emitJSON(stdout, rep)
 			} else {
 				printUpdateReport(stdout, rep)
+			}
+			if operationFailed {
+				return errQuiet
 			}
 			if checkOnly && exitCode && rep.Behind > 0 {
 				return exitCodeError{code: exitCodeUpdatesAvailable}
@@ -341,7 +360,7 @@ func countBehind(rep updateReport) int {
 		}
 	}
 	for _, s := range rep.Skills {
-		if s.Status == "behind" || s.Status == "error" {
+		if s.Status == "behind" || s.Status == "error" || (s.Status == "preserved" && s.Installed != rep.Target) {
 			n++
 		}
 	}
@@ -367,6 +386,9 @@ func updateNotes(rep updateReport) []string {
 			strings.Join(rep.Connector.Versions, ","), rep.Target, selfupdate.RepoSlug, rep.Target))
 	}
 	for _, s := range rep.Skills {
+		if s.Status == "preserved" {
+			notes = append(notes, fmt.Sprintf("skill %s kept local content and its previous version marker; release parity is not claimed", s.Client))
+		}
 		if s.Status == "not-installed" {
 			notes = append(notes, fmt.Sprintf("skill not installed for %s — `easyeda update --create-missing` to add %s", s.Client, s.Dir))
 		}

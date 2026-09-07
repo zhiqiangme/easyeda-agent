@@ -10,9 +10,13 @@ package selfupdate
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -60,13 +64,42 @@ func skillDir(client string) string {
 	if err != nil {
 		return ""
 	}
+	var base string
 	switch client {
 	case "claude":
-		return filepath.Join(home, ".claude", "skills", SkillName)
+		base = os.Getenv("CLAUDE_CONFIG_DIR")
+		if base == "" {
+			base = filepath.Join(home, ".claude")
+		}
 	case "codex":
-		return filepath.Join(home, ".codex", "skills", SkillName)
+		base = os.Getenv("CODEX_HOME")
+		if base == "" {
+			base = filepath.Join(home, ".codex")
+		}
+	default:
+		return ""
 	}
-	return ""
+	if !filepath.IsAbs(base) {
+		return ""
+	}
+	return filepath.Join(base, "skills", SkillName)
+}
+
+// ValidateClients rejects unsupported client names and relative client homes
+// before any network or filesystem work. An empty selection means both clients.
+func ValidateClients(clients []string) error {
+	if len(clients) == 0 {
+		clients = clientOrder
+	}
+	for _, client := range clients {
+		if client != "codex" && client != "claude" {
+			return fmt.Errorf("unknown skill client %q (want codex or claude)", client)
+		}
+		if skillDir(client) == "" {
+			return fmt.Errorf("invalid %s client home: CODEX_HOME/CLAUDE_CONFIG_DIR and user home must be absolute paths", client)
+		}
+	}
+	return nil
 }
 
 // Targets returns skill targets in deterministic order. When onlyPresent is true,
@@ -159,7 +192,7 @@ type TargetOutcome struct {
 	Dir    string `json:"dir"`
 	From   string `json:"from"`   // installed version before
 	To     string `json:"to"`     // target version
-	Status string `json:"status"` // updated|up-to-date|created|skipped|error
+	Status string `json:"status"` // updated|up-to-date|created|preserved|skipped|error
 	Err    string `json:"err,omitempty"`
 }
 
@@ -202,7 +235,8 @@ func SyncSkills(ctx context.Context, opts SyncOptions, logf func(string, ...any)
 	for _, c := range want {
 		dir := skillDir(c)
 		if dir == "" {
-			res.Outcomes = append(res.Outcomes, TargetOutcome{Client: c, Status: "error", Err: "unknown client"})
+			clientErr := ValidateClients([]string{c})
+			res.Outcomes = append(res.Outcomes, TargetOutcome{Client: c, Status: "error", Err: clientErr.Error()})
 			continue
 		}
 		present := isDir(dir)
@@ -218,8 +252,8 @@ func SyncSkills(ctx context.Context, opts SyncOptions, logf func(string, ...any)
 		jobs = append(jobs, job{client: c, dir: dir, from: from, create: !present})
 	}
 
-	if len(jobs) == 0 {
-		return res, nil
+	if len(jobs) == 0 || syncOutcomeError(res) != nil {
+		return res, syncOutcomeError(res)
 	}
 
 	// Download + extract the release skill tree once into a temp dir.
@@ -238,13 +272,14 @@ func SyncSkills(ctx context.Context, opts SyncOptions, logf func(string, ...any)
 		status := "updated"
 		if j.create {
 			status = "created"
+		} else if opts.Preserve {
+			status = "preserved"
 		}
-		if err := materialize(srcRoot, j.dir, opts.Preserve); err != nil {
+		if err := materialize(srcRoot, j.dir, opts.Preserve, target); err != nil {
 			res.Outcomes = append(res.Outcomes, TargetOutcome{Client: j.client, Dir: j.dir, From: j.from, To: target, Status: "error", Err: err.Error()})
 			log("skill-sync: %s %s FAILED: %v", j.client, j.dir, err)
 			continue
 		}
-		_ = os.WriteFile(filepath.Join(j.dir, versionMarker), []byte(target+"\n"), 0644)
 		res.Outcomes = append(res.Outcomes, TargetOutcome{Client: j.client, Dir: j.dir, From: j.from, To: target, Status: status})
 		res.Changed++
 		fromLabel := j.from
@@ -253,7 +288,17 @@ func SyncSkills(ctx context.Context, opts SyncOptions, logf func(string, ...any)
 		}
 		log("skill-sync: %s %s → %s (%s)", j.client, fromLabel, target, j.dir)
 	}
-	return res, nil
+	return res, syncOutcomeError(res)
+}
+
+func syncOutcomeError(res SyncResult) error {
+	var failures []error
+	for _, outcome := range res.Outcomes {
+		if outcome.Status == "error" {
+			failures = append(failures, fmt.Errorf("%s: %s", outcome.Client, outcome.Err))
+		}
+	}
+	return errors.Join(failures...)
 }
 
 // fetchSkillTree downloads skills.tar.gz for the version and extracts it to a
@@ -280,13 +325,34 @@ func fetchSkillTree(ctx context.Context, version string) (root string, cleanup f
 	}
 	cleanup = func() { _ = os.RemoveAll(tmp) }
 
-	gz, err := gzip.NewReader(resp.Body)
+	// Verify the entire archive before trusting or installing any extracted file.
+	archive, err := io.ReadAll(io.LimitReader(resp.Body, (64<<20)+1))
+	if err != nil || len(archive) > 64<<20 {
+		cleanup()
+		if err == nil {
+			err = fmt.Errorf("skills.tar.gz exceeds 64 MiB")
+		}
+		return "", func() {}, err
+	}
+	sum := sha256.Sum256(archive)
+	want, err := fetchChecksum(ctx, version, "skills.tar.gz")
+	legacyNoChecksum := errors.Is(err, errChecksumUnavailable)
+	if err != nil && !errors.Is(err, errChecksumUnavailable) {
+		cleanup()
+		return "", func() {}, fmt.Errorf("verify skills.tar.gz: %w", err)
+	}
+	if err == nil && !strings.EqualFold(want, hex.EncodeToString(sum[:])) {
+		cleanup()
+		return "", func() {}, fmt.Errorf("checksum mismatch for skills.tar.gz")
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		cleanup()
 		return "", func() {}, err
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
+	var extractedBytes int64
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -312,6 +378,11 @@ func fetchSkillTree(ctx context.Context, version string) (root string, cleanup f
 				return "", func() {}, err
 			}
 		case tar.TypeReg:
+			extractedBytes += hdr.Size
+			if hdr.Size > 64<<20 || extractedBytes > 256<<20 {
+				cleanup()
+				return "", func() {}, fmt.Errorf("skills.tar.gz extracted content exceeds size limit")
+			}
 			if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 				cleanup()
 				return "", func() {}, err
@@ -326,25 +397,131 @@ func fetchSkillTree(ctx context.Context, version string) (root string, cleanup f
 				cleanup()
 				return "", func() {}, err
 			}
-			f.Close()
+			if err := f.Close(); err != nil {
+				cleanup()
+				return "", func() {}, err
+			}
 		}
 	}
 
 	root = filepath.Join(tmp, SkillName)
-	if !isDir(root) {
+	skill, readErr := os.ReadFile(filepath.Join(root, "SKILL.md"))
+	if !isDir(root) || readErr != nil || len(strings.TrimSpace(string(skill))) == 0 {
 		cleanup()
-		return "", func() {}, fmt.Errorf("skills.tar.gz did not contain %s/", SkillName)
+		return "", func() {}, fmt.Errorf("skills.tar.gz did not contain a nonempty %s/SKILL.md", SkillName)
+	}
+	declared, err := skillMetadataVersion(string(skill))
+	if err != nil || (declared == "" && !(legacyNoChecksum && SemverLess(version, "1.4.0"))) || (declared != "" && declared != version) {
+		cleanup()
+		return "", func() {}, fmt.Errorf("SKILL.md metadata.version %q does not match target %s (parse error: %v)", declared, version, err)
 	}
 	return root, cleanup, nil
 }
 
-// materialize copies the extracted skill tree onto dst. When preserve is true,
-// existing files are kept (not overwritten); otherwise files are overwritten.
-// Removed-in-new files are left in place (a safety-net sync never deletes).
-func materialize(src, dst string, preserve bool) error {
-	if err := os.MkdirAll(dst, 0755); err != nil {
+// skillMetadataVersion reads the published frontmatter contract: metadata is a
+// top-level mapping and its version is an indented scalar. It does not scan
+// prose or accept a similarly named field elsewhere in the document.
+func skillMetadataVersion(body string) (string, error) {
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return "", nil
+	}
+	inMetadata, seenMetadata, closed := false, false, false
+	version := ""
+	for _, line := range lines[1:] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			closed = true
+			break
+		}
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			inMetadata = trimmed == "metadata:"
+			if inMetadata {
+				if seenMetadata {
+					return "", fmt.Errorf("duplicate metadata mapping")
+				}
+				seenMetadata = true
+			}
+			continue
+		}
+		if inMetadata && strings.HasPrefix(line, "  version:") {
+			if version != "" {
+				return "", fmt.Errorf("duplicate metadata.version")
+			}
+			value := strings.TrimSpace(strings.TrimPrefix(line, "  version:"))
+			value = strings.Trim(value, "\"'")
+			if !IsCleanRelease(value) {
+				return "", fmt.Errorf("invalid metadata.version %q", value)
+			}
+			version = SemverCore(value)
+		}
+	}
+	if !closed {
+		return "", fmt.Errorf("unclosed YAML frontmatter")
+	}
+	return version, nil
+}
+
+// materialize prepares a complete sibling directory, then switches it into
+// place. Failed copies never change the installation; a failed switch restores
+// its backup. A normal sync removes files absent from the release. Preserve mode
+// merges local content and keeps its old marker rather than claiming parity.
+func materialize(src, dst string, preserve bool, version string) error {
+	if resolved, err := filepath.EvalSymlinks(dst); err == nil {
+		dst = resolved
+	}
+	parent := filepath.Dir(dst)
+	if err := os.MkdirAll(parent, 0755); err != nil {
 		return err
 	}
+	stage, err := os.MkdirTemp(parent, ".easyeda-skill-stage-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stage)
+	existed := isDir(dst)
+	if preserve && existed {
+		if err := copyTree(dst, stage, false, false); err != nil {
+			return err
+		}
+	}
+	if err := copyTree(src, stage, preserve, true); err != nil {
+		return err
+	}
+	if !preserve || !existed {
+		if err := os.WriteFile(filepath.Join(stage, versionMarker), []byte(version+"\n"), 0644); err != nil {
+			return err
+		}
+	}
+	if err := os.Chmod(stage, 0755); err != nil {
+		return err
+	}
+	if !existed {
+		return os.Rename(stage, dst)
+	}
+	backup, err := os.MkdirTemp(parent, ".easyeda-skill-backup-*")
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(backup); err != nil {
+		return err
+	}
+	if err := os.Rename(dst, backup); err != nil {
+		return err
+	}
+	if err := os.Rename(stage, dst); err != nil {
+		if restoreErr := os.Rename(backup, dst); restoreErr != nil {
+			return fmt.Errorf("switch skill: %w; restore failed: %v (original preserved at %s)", err, restoreErr, backup)
+		}
+		return err
+	}
+	return os.RemoveAll(backup)
+}
+
+func copyTree(src, dst string, preserve, skipMarker bool) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -353,16 +530,22 @@ func materialize(src, dst string, preserve bool) error {
 		if err != nil {
 			return err
 		}
-		if rel == "." {
+		if rel == "." || (skipMarker && rel == versionMarker) {
 			return nil
 		}
 		target := filepath.Join(dst, rel)
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("skill tree contains unsupported symlink %s", path)
+		}
 		if info.IsDir() {
 			return os.MkdirAll(target, 0755)
 		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("skill tree contains non-regular file %s", path)
+		}
 		if preserve {
 			if _, err := os.Stat(target); err == nil {
-				return nil // keep existing
+				return nil
 			}
 		}
 		return copyFile(path, target, info.Mode())
@@ -449,47 +632,32 @@ func IsCleanRelease(v string) bool {
 	return core != "" && core == strings.TrimPrefix(strings.TrimSpace(v), "v")
 }
 
-// StartupSync is the daemon's best-effort skill refresh, run in the background on
-// `daemon start`. It brings every ALREADY-PRESENT skill dir up to the latest
-// release (never creates a new one), logging each step via logf, then — if the
-// running CLI/daemon is itself behind the latest — logs an actionable nudge to
-// re-run install.sh (which also re-imports the connector). It never blocks the
-// daemon and never fails hard: any network hiccup just skips this cycle.
+// StartupSync aligns installed skills with the running released CLI. A pinned
+// installation must remain pinned even when a newer release becomes available.
+// Development builds skip automatic writes. Checking latest only prints a nudge.
 func StartupSync(ctx context.Context, daemonVersion string, logf func(string, ...any)) {
 	log := func(format string, a ...any) {
 		if logf != nil {
 			logf(format, a...)
 		}
 	}
-	present := Targets(true)
-	if len(present) == 0 {
-		return // no installed skill dirs — nothing to keep in sync
-	}
-	latest, err := LatestReleaseVersion(ctx)
-	if err != nil {
-		log("skill-sync: skipped this cycle (cannot reach GitHub: %v)", err)
+	if !IsCleanRelease(daemonVersion) || len(Targets(true)) == 0 {
 		return
 	}
-
-	// Sync present dirs to latest. SyncSkills only downloads if something is behind.
+	target := SemverCore(daemonVersion)
 	res, err := SyncSkills(ctx, SyncOptions{
-		TargetVersion: latest,
+		TargetVersion: target,
 		Preserve:      PreserveFromEnv(),
 	}, log)
-	if err == nil && res.Changed == 0 {
-		// Quiet steady-state: everything already current.
-	} else if err != nil {
+	if err != nil {
 		log("skill-sync: %v", err)
 	}
 	if res.Changed > 0 {
-		log("skill-sync: updated %d skill dir(s) to v%s", res.Changed, latest)
+		log("skill-sync: refreshed %d skill dir(s) for CLI v%s", res.Changed, target)
 	}
-
-	// Nudge the full-suite upgrade when the CLI/connector lag the latest release.
-	if IsCleanRelease(daemonVersion) && SemverLess(daemonVersion, latest) {
-		log("update available: CLI v%s < latest v%s — run `easyeda update` to replace the "+
-			"CLI binary (skill already synced), then restart the daemon; the connector .eext "+
-			"still needs a manual re-import (`easyeda update --check` prints the URL)",
-			SemverCore(daemonVersion), latest)
+	latest, err := LatestReleaseVersion(ctx)
+	if err == nil && SemverLess(target, latest) {
+		log("update available: CLI v%s < latest v%s — run `easyeda update`, then restart the daemon; "+
+			"the connector .eext still needs a manual re-import (`easyeda update --check` prints the URL)", target, latest)
 	}
 }

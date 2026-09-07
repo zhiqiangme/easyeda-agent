@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -82,6 +84,22 @@ func makeTarball(t *testing.T, files map[string]string, withEvil bool) []byte {
 	return buf.Bytes()
 }
 
+func skillDocument(version, body string) string {
+	return "---\nname: easyeda-agent\nmetadata:\n  version: \"" + version + "\"\n---\n" + body
+}
+
+func makeVersionedTarball(t *testing.T, version string, files map[string]string, withEvil bool) []byte {
+	t.Helper()
+	copyFiles := make(map[string]string, len(files))
+	for name, body := range files {
+		if name == "SKILL.md" {
+			body = skillDocument(version, body)
+		}
+		copyFiles[name] = body
+	}
+	return makeTarball(t, copyFiles, withEvil)
+}
+
 func serveRelease(t *testing.T, version string, tarball []byte) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -91,15 +109,18 @@ func serveRelease(t *testing.T, version string, tarball []byte) *httptest.Server
 			_, _ = w.Write([]byte(`{"tag_name":"v` + version + `"}`))
 		case "/download":
 			_, _ = w.Write(tarball)
+		case "/checksums":
+			_, _ = fmt.Fprintf(w, "%x  skills.tar.gz\n", sha256.Sum256(tarball))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
-	oldTar, oldLatest := tarballURL, latestAPIURL
+	oldTar, oldLatest, oldSums := tarballURL, latestAPIURL, checksumsURL
 	tarballURL = func(v string) string { return srv.URL + "/download" }
 	latestAPIURL = func() string { return srv.URL + "/releases/latest" }
+	checksumsURL = func(string) string { return srv.URL + "/checksums" }
 	t.Cleanup(func() {
-		tarballURL, latestAPIURL = oldTar, oldLatest
+		tarballURL, latestAPIURL, checksumsURL = oldTar, oldLatest, oldSums
 		srv.Close()
 	})
 	return srv
@@ -108,6 +129,9 @@ func serveRelease(t *testing.T, version string, tarball []byte) *httptest.Server
 func TestSyncSkills_UpdateAndIdempotent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	dir := filepath.Join(home, ".claude", "skills", SkillName)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
@@ -118,7 +142,7 @@ func TestSyncSkills_UpdateAndIdempotent(t *testing.T) {
 	}
 	_ = os.WriteFile(filepath.Join(dir, versionMarker), []byte("0.8.3\n"), 0644)
 
-	serveRelease(t, "0.9.0", makeTarball(t, map[string]string{
+	serveRelease(t, "0.9.0", makeVersionedTarball(t, "0.9.0", map[string]string{
 		"SKILL.md":           "NEW",
 		"references/flow.md": "flow",
 	}, false))
@@ -131,7 +155,7 @@ func TestSyncSkills_UpdateAndIdempotent(t *testing.T) {
 		t.Fatalf("changed=%d want 1", res.Changed)
 	}
 	// Overwrote the stale file, added the new one, wrote the marker.
-	if b, _ := os.ReadFile(filepath.Join(dir, "SKILL.md")); string(b) != "NEW" {
+	if b, _ := os.ReadFile(filepath.Join(dir, "SKILL.md")); string(b) != skillDocument("0.9.0", "NEW") {
 		t.Errorf("SKILL.md=%q want NEW", b)
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "references", "flow.md")); string(b) != "flow" {
@@ -157,6 +181,9 @@ func TestSyncSkills_UpdateAndIdempotent(t *testing.T) {
 func TestSyncSkills_Preserve(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	dir := filepath.Join(home, ".claude", "skills", SkillName)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
@@ -165,7 +192,7 @@ func TestSyncSkills_Preserve(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serveRelease(t, "0.9.0", makeTarball(t, map[string]string{
+	serveRelease(t, "0.9.0", makeVersionedTarball(t, "0.9.0", map[string]string{
 		"SKILL.md": "UPSTREAM",
 		"new.md":   "brand-new",
 	}, false))
@@ -185,7 +212,10 @@ func TestSyncSkills_Preserve(t *testing.T) {
 func TestSyncSkills_NotInstalledSkipped(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	serveRelease(t, "0.9.0", makeTarball(t, map[string]string{"SKILL.md": "x"}, false))
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	serveRelease(t, "0.9.0", makeVersionedTarball(t, "0.9.0", map[string]string{"SKILL.md": "x"}, false))
 
 	res, err := SyncSkills(context.Background(), SyncOptions{TargetVersion: "0.9.0", Clients: []string{"claude"}}, nil)
 	if err != nil {
@@ -207,11 +237,14 @@ func TestSyncSkills_NotInstalledSkipped(t *testing.T) {
 func TestFetchSkillTree_TraversalGuard(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	dir := filepath.Join(home, ".codex", "skills", SkillName)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	serveRelease(t, "0.9.0", makeTarball(t, map[string]string{"SKILL.md": "ok"}, true))
+	serveRelease(t, "0.9.0", makeVersionedTarball(t, "0.9.0", map[string]string{"SKILL.md": "ok"}, true))
 
 	res, err := SyncSkills(context.Background(), SyncOptions{TargetVersion: "0.9.0", Clients: []string{"codex"}}, nil)
 	if err != nil {
@@ -221,7 +254,7 @@ func TestFetchSkillTree_TraversalGuard(t *testing.T) {
 	if res.Changed != 1 {
 		t.Fatalf("changed=%d want 1", res.Changed)
 	}
-	if b, _ := os.ReadFile(filepath.Join(dir, "SKILL.md")); string(b) != "ok" {
+	if b, _ := os.ReadFile(filepath.Join(dir, "SKILL.md")); string(b) != skillDocument("0.9.0", "ok") {
 		t.Errorf("SKILL.md=%q want ok", b)
 	}
 	// The malicious ../evil.txt must NOT have escaped anywhere reachable.

@@ -53,7 +53,7 @@ window once its edits quiesce for the debounce window (a burst coalesces into on
 save). Set to 0 to disable.
 
 Skill auto-update (--auto-update-skill, on by default) keeps your installed
-easyeda-agent skill dirs (~/.claude, ~/.codex) in sync with the latest release on
+easyeda-agent skill dirs (CLAUDE_CONFIG_DIR / CODEX_HOME, default ~/.claude / ~/.codex) in sync with this daemon's release on
 startup, so you never hand-copy the skill after a CLI upgrade. It touches only
 dirs that already exist, honors EASYEDA_SKILL_PRESERVE=1, and logs each change.
 The EasyEDA connector .eext has no sideload auto-update (marketplace-only), so a
@@ -120,7 +120,7 @@ extension/src/transport.ts).`,
 	c.Flags().DurationVar(&autosaveDebounce, "autosave-debounce", 3*time.Second,
 		"autosave a window this long after its last mutating action (0 = disable)")
 	c.Flags().BoolVar(&autoUpdateSkill, "auto-update-skill", true,
-		"on startup, sync installed skill dirs to the latest release (best-effort)")
+		"on startup, sync installed skill dirs to this daemon's release; skip dev builds (best-effort)")
 	return c
 }
 

@@ -30,7 +30,8 @@ func newSkillCmd(stdout, stderr io.Writer) *cobra.Command {
 			"  easyeda skill status                 show installed skill dirs + versions vs latest release\n" +
 			"  easyeda skill sync                   update present skill dirs to the latest release\n" +
 			"  easyeda skill sync --version 0.9.0   pin a specific version\n\n" +
-			"The daemon also syncs skill dirs on startup (daemon start --auto-update-skill).\n" +
+			"The daemon syncs installed Skill dirs to its own version on startup; development builds skip writes.\n" +
+			"CODEX_HOME / CLAUDE_CONFIG_DIR override the default client config roots.\n" +
 			"To update the CLI binary as well, use `easyeda update` (skill sync included).\n" +
 			"The connector .eext is NOT covered here (no sideload auto-update) — the daemon\n" +
 			"logs a re-import notice when it detects a stale connector.",
@@ -57,6 +58,9 @@ func newSkillStatusCmd(stdout, stderr io.Writer) *cobra.Command {
 		Short: "Show installed skill dirs, their versions, and the latest release",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := selfupdate.ValidateClients(nil); err != nil {
+				return err
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
 
@@ -123,7 +127,7 @@ func newSkillSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 		Long: "Download the release skill bundle and materialize it into your client skill dirs.\n\n" +
 			"By default only dirs that already exist are updated, to the LATEST release.\n" +
 			"Use --create-missing to install into a client dir that doesn't exist yet,\n" +
-			"--preserve to keep local edits (never overwrite an existing file), and\n" +
+			"--preserve to keep local edits and the previous version marker (mixed content), and\n" +
 			"--version to pin a specific release instead of latest.",
 		Args: cobra.NoArgs,
 		Example: `  easyeda skill sync
@@ -131,6 +135,9 @@ func newSkillSyncCmd(stdout, stderr io.Writer) *cobra.Command {
   easyeda skill sync --client claude --preserve
   easyeda skill sync --create-missing`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := selfupdate.ValidateClients(normalizeClients(clients)); err != nil {
+				return err
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
@@ -172,7 +179,7 @@ func newSkillSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 					}
 					fmt.Fprintln(stdout, line)
 				}
-				fmt.Fprintf(stdout, "→ %d dir(s) updated to v%s\n", res.Changed, res.Target)
+				fmt.Fprintf(stdout, "→ %d dir(s) changed; requested v%s (preserved directories keep their previous marker)\n", res.Changed, res.Target)
 			}
 			return err
 		},
