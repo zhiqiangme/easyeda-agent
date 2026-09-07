@@ -8,6 +8,7 @@
 import { type BeautifyOptions, runBeautify } from './beautify';
 import { armDeadline } from './deadlines';
 import { documentTypeLabel, readResponseContext } from './eda-context';
+import { readProjectFootprintSourceArchive } from './native-footprint-source';
 import {
 	ActionError,
 	type ActionResult,
@@ -32,6 +33,7 @@ import {
 	optionalString,
 	pickNamedCandidate,
 	readDeviceFootprint,
+	readNativeFootprintSource,
 	requireNumber,
 	requireString,
 	requireStringArray,
@@ -925,6 +927,7 @@ export const schematicComponentsList: Handler = async (payload) => {
 	// Connectivity export opts into this hydration so an IR snapshot is
 	// replayable instead of sending an instance id that makes create() hang.
 	const includeDeviceIdentity = optionalBoolean(payload, 'includeDeviceIdentity') === true;
+	const identityReadContext = includeDeviceIdentity ? await readResponseContext() : undefined;
 	// A fail-closed, read-only preflight inventory. It is deliberately captured
 	// before tagPages can cycle documents and always describes the page that was
 	// active when the request started, even when allPages=true.
@@ -1000,6 +1003,10 @@ export const schematicComponentsList: Handler = async (payload) => {
 		}
 	}
 
+	// Keep one fresh official source inventory per list request, never across
+	// requests/pages. Individual identity resolution still validates its own entry.
+	let nativeFootprintInventory: Promise<NativeFootprintInventory> | undefined;
+	const getNativeFootprints = () => nativeFootprintInventory ??= loadNativeFootprintInventory(identityReadContext);
 	const serialized: Array<Record<string, unknown>> = [];
 	for (const component of components) {
 		const record = serializeComponent(component);
@@ -1009,7 +1016,7 @@ export const schematicComponentsList: Handler = async (payload) => {
 			// A valid library uuid is already authoritative; only resolve the
 			// suspicious instance-shaped identity to avoid needless API calls.
 			if (rawUuid.length !== 32) {
-				const resolved = await resolvePlacedDevice(record);
+				const resolved = await resolvePlacedDevice(record, getNativeFootprints);
 				if (resolved.device) {
 					record.placedDevice = rawDevice;
 					record.device = {
@@ -1019,6 +1026,8 @@ export const schematicComponentsList: Handler = async (payload) => {
 					};
 					record.deviceResolution = {
 						via: resolved.device.via,
+						...(resolved.device.via === 'lcsc-footprint-source' ? { sameFootprintUUID: true } : {}),
+						...(resolved.footprintSource ? { footprintSource: resolved.footprintSource } : {}),
 						...(resolved.lcsc ? { lcsc: resolved.lcsc } : {}),
 						...(resolved.deviceFootprint ? { footprint: resolved.deviceFootprint } : {}),
 					};
@@ -4333,7 +4342,7 @@ const schematicLibraryGetByLcscIds: Handler = async (payload) => {
 	try {
 		// The array overload returns Array<ILIB_DeviceSearchItem> (same record
 		// shape as lib_Device.search).
-		raw = await eda.lib_Device.getByLcscIds(lcscIds);
+		raw = await eda.lib_Device.getByLcscIds(lcscIds, undefined, true);
 	}
 	catch (err) {
 		throw edaError(err, 'Failed to look up devices by LCSC id.');
@@ -5467,23 +5476,163 @@ export function diffPins(
  * BEFORE touching the canvas rather than run without a working rollback.
  */
 /** A resolution candidate surfaced when the safe chain refuses to pick. */
-interface LcscCandidate { name: string; lcsc: string; footprintName: string; uuid: string }
+interface LcscCandidate {
+ name: string; lcsc: string; footprintName: string; uuid: string;
+ libraryUuid: string; footprintUuid: string; footprintLibraryUuid: string;
+}
 
 /** Structured outcome of the safe placed-part → device resolution (#158). */
 interface DeviceResolution {
 	device?: DeviceRef & { via: string };
 	lcsc?: string;
 	deviceFootprint?: string;
+	footprintSource?: { instanceUuid: string; uuid: string; libraryUuid: string; sourceKind?: 'project-epro2' };
 	reason?: string;
 	candidates?: Array<LcscCandidate>;
 }
 
-const asCandidate = (r: Record<string, unknown>): LcscCandidate => ({
-	name: String(r.name ?? ''),
-	lcsc: String(r.supplierId ?? ''),
-	footprintName: readDeviceFootprint(r).name,
-	uuid: String(r.uuid ?? ''),
-});
+const asCandidate = (r: Record<string, unknown>): LcscCandidate => {
+ const footprint = readDeviceFootprint(r);
+ return {
+  name: String(r.name ?? ''), lcsc: String(r.supplierId ?? ''), uuid: String(r.uuid ?? ''),
+  libraryUuid: String(r.libraryUuid ?? ''), footprintName: footprint.name,
+  footprintUuid: footprint.uuid, footprintLibraryUuid: footprint.libraryUuid,
+ };
+};
+
+const identityRecord = (value: unknown): Record<string, unknown> =>
+	value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+const identityText = (value: unknown): string => typeof value === 'string' ? value : '';
+const instanceIdentityUuid = (value: unknown): boolean => /^[0-9a-f]{16}$/i.test(identityText(value));
+const libraryIdentityUuid = (value: unknown): boolean => /^[0-9a-f]{32}$/i.test(identityText(value));
+const stableIdentityName = (value: unknown): string => {
+	const name = identityText(value);
+	return name && !name.startsWith('=') ? name : '';
+};
+
+interface NativeFootprintInventory { entries?: unknown; error?: string }
+async function loadNativeFootprintInventory(expectedContext?: { projectUuid?: string; documentUuid?: string }): Promise<NativeFootprintInventory> {
+	try {
+		const before = await readResponseContext();
+		if (!before.projectUuid || !before.documentUuid) return { error: 'native footprint source requires a known current project and document' };
+		if (expectedContext && (before.projectUuid !== expectedContext.projectUuid || before.documentUuid !== expectedContext.documentUuid)) return { error: 'project/document changed since the component identity snapshot' };
+		let entries: unknown;
+		let documentError = '';
+		try {
+			entries = await eda.sys_FileManager.getDocumentFootprintSources();
+		} catch (err) { documentError = describeThrown(err); }
+		if (!Array.isArray(entries) || entries.length === 0) {
+			// The SDK's document-footprint API returns [] in schematic editors.
+			// The official current-project epro2 archive retains DOCHEAD/META.source.
+			if (typeof eda.sys_FileManager?.getProjectFile !== 'function') return { error: `official footprint source inventory unavailable; project export unavailable${documentError ? ` (${documentError})` : ''}` };
+			const archive = await eda.sys_FileManager.getProjectFile('easyeda-agent-identity.epro2', undefined, 'epro2');
+			if (!archive) return { error: 'official project export did not return a source archive' };
+			entries = await readProjectFootprintSourceArchive(archive, before.documentUuid);
+		}
+		if (!Array.isArray(entries) || entries.length > 2048) return { error: 'official footprint source inventory is incomplete or exceeds 2048 entries' };
+		const after = await readResponseContext();
+		if (after.projectUuid !== before.projectUuid || after.documentUuid !== before.documentUuid) return { error: 'project/document changed while reading native footprint source' };
+		return { entries };
+	} catch (err) {
+		return { error: `official footprint source query failed: ${describeThrown(err)}` };
+	}
+}
+
+/**
+ * EasyEDA can expose 16-hex project instance refs for BOTH device and footprint.
+ * They cannot equal the 32-hex library refs. This narrow recovery is deliberately
+ * separate from footprintMatchesInstance, whose asset-UUID comparisons stay strict.
+ * Native DOCHEAD/META.source supplies the actual 16→32 footprint origin. A full
+ * LCSC candidate set and official get() association must identify that exact
+ * source asset. Matching package names without native source is insufficient
+ * for reconstruction and never hydrates a replayable device identity.
+ */
+async function resolveInstanceFootprintDevice(
+	snapshot: Record<string, unknown>,
+	getNativeFootprints: () => Promise<NativeFootprintInventory>,
+): Promise<DeviceResolution> {
+	const instanceFp = readDeviceFootprint(snapshot);
+	const supplierId = identityText(snapshot.supplierId);
+	const mpn = identityText(snapshot.manufacturerId);
+	const sourceName = stableIdentityName(identityRecord(snapshot.component).name)
+		|| stableIdentityName(snapshot.name) || stableIdentityName(identityRecord(snapshot.device).name);
+	const context = `instance footprint uuid=${JSON.stringify(instanceFp.uuid)}, libraryUuid=${JSON.stringify(instanceFp.libraryUuid)}`;
+	const failure = (reason: string, candidates: Array<LcscCandidate> = []): DeviceResolution => ({
+		reason: `${reason}; ${context}; instance/library UUID domains require native META.source plus exact LCSC/model and official asset-library evidence`,
+		...(candidates.length ? { candidates: candidates.slice(0, 5) } : {}),
+	});
+	if (!/^C\d+$/.test(supplierId) || !instanceFp.libraryUuid || (!mpn && !sourceName)) {
+		return failure('incomplete identity evidence for 16-hex instance footprint');
+	}
+	const inventory = await getNativeFootprints();
+	if (inventory.error) return failure(inventory.error);
+	const native = readNativeFootprintSource(inventory.entries, instanceFp.uuid);
+	if (!native.source) return failure(native.error ?? 'native footprint source is missing; name-only evidence cannot establish reconstruction identity');
+	if (native.source.libraryUuid !== instanceFp.libraryUuid) return failure('native footprint source library conflicts with the placed footprint provenance');
+	let raw: Array<Record<string, unknown>>;
+	try {
+		// Without allowMultiMatch=true the API may hide an equally valid device.
+		const queried = await eda.lib_Device.getByLcscIds([supplierId], undefined, true);
+		if (!Array.isArray(queried)) return failure('complete LCSC candidate inventory unavailable');
+		raw = queried as unknown as Array<Record<string, unknown>>;
+	} catch (err) {
+		return failure(`complete LCSC candidate query failed: ${describeThrown(err)}`);
+	}
+	const candidates = raw.map(asCandidate);
+	const matches = new Map<string, Record<string, unknown>>();
+	const unresolvedEvidence: Array<string> = [];
+	for (const hit of raw) {
+		const searchProperties = identityRecord(hit.otherProperty);
+		const searchLcsc = identityText(hit.supplierId ?? searchProperties['Supplier Part']);
+		const searchMpn = identityText(hit.manufacturerId ?? searchProperties['Manufacturer Part']);
+		const searchName = stableIdentityName(hit.name);
+		// A known different model is not an ambiguity. Missing/conflicting detail
+		// evidence for a plausible candidate must never be discarded to pick a first hit.
+		if (searchLcsc && searchLcsc !== supplierId) continue;
+		if (mpn ? searchMpn && searchMpn !== mpn : searchName && searchName !== sourceName) continue;
+		const searchFp = readDeviceFootprint(hit);
+		if (!libraryIdentityUuid(hit.uuid) || !identityText(hit.libraryUuid) || !libraryIdentityUuid(searchFp.uuid)) {
+			unresolvedEvidence.push('candidate lacks a library device/footprint identity');
+			continue;
+		}
+		let detail: Record<string, unknown>;
+		try {
+			detail = identityRecord(await eda.lib_Device.get(hit.uuid as string, hit.libraryUuid as string));
+		} catch (err) {
+			unresolvedEvidence.push(`device.get ${hit.uuid} failed: ${describeThrown(err)}`);
+			continue;
+		}
+		const property = identityRecord(detail.property);
+		const associationFp = readDeviceFootprint({ association: detail.association });
+		if (detail.uuid !== hit.uuid || detail.libraryUuid !== hit.libraryUuid
+			|| !libraryIdentityUuid(associationFp.uuid) || !associationFp.libraryUuid
+			|| associationFp.uuid !== searchFp.uuid
+			|| (searchFp.libraryUuid && searchFp.libraryUuid !== associationFp.libraryUuid)) {
+			unresolvedEvidence.push(`device.get ${hit.uuid} identity/footprint association is missing or conflicts with the search candidate`);
+			continue;
+		}
+		if (property.supplierId !== supplierId || (mpn
+			? property.manufacturerId !== mpn
+			: (stableIdentityName(detail.name) !== sourceName && stableIdentityName(property.name) !== sourceName))) {
+			unresolvedEvidence.push(`device.get ${hit.uuid} lacks matching exact LCSC and model/name evidence`);
+			continue;
+		}
+		if (associationFp.uuid !== native.source.uuid || associationFp.libraryUuid !== native.source.libraryUuid) continue;
+		const proven = { ...hit, footprint: { ...searchFp, libraryUuid: associationFp.libraryUuid } };
+		matches.set(JSON.stringify([hit.libraryUuid, hit.uuid]), proven);
+	}
+	if (unresolvedEvidence.length) return failure(unresolvedEvidence.join('; '), candidates);
+	if (matches.size !== 1) return failure(matches.size
+		? `${matches.size} distinct devices match exact LCSC/model and native footprint source — ambiguous`
+		: 'no device matches exact LCSC/model and native footprint source (package-variant mismatch)', candidates);
+	const hit = [...matches.values()][0];
+	return {
+		device: { uuid: hit.uuid as string, libraryUuid: hit.libraryUuid as string, via: 'lcsc-footprint-source' },
+		lcsc: supplierId,
+		deviceFootprint: readDeviceFootprint(hit).name,
+		footprintSource: native.source,
+	};
+}
 
 /**
  * Safe structured resolver behind resolvePlacedDeviceIdentity — NEVER falls
@@ -5502,8 +5651,14 @@ const asCandidate = (r: Record<string, unknown>): LcscCandidate => ({
  * whole board as package-variant mismatches (T-3: 26/26 parts unresolved;
  * T-16: `sch replace` refused, since it resolves the OLD device through here).
  */
-async function resolvePlacedDevice(snapshot: Record<string, unknown>): Promise<DeviceResolution> {
+async function resolvePlacedDevice(
+	snapshot: Record<string, unknown>,
+	getNativeFootprints: () => Promise<NativeFootprintInventory> = loadNativeFootprintInventory,
+): Promise<DeviceResolution> {
 	const instanceFp = readDeviceFootprint(snapshot);
+	if (instanceIdentityUuid(identityRecord(snapshot.device).uuid) && instanceIdentityUuid(instanceFp.uuid)) {
+		return resolveInstanceFootprintDevice(snapshot, getNativeFootprints);
+	}
 	const fpIdentity = instanceFp.name || instanceFp.uuid || instanceFp.libraryUuid;
 	const finish = (hits: Array<Record<string, unknown>>, via: string): DeviceResolution | undefined => {
 		let pool = hits.filter(r => typeof r.uuid === 'string' && typeof r.libraryUuid === 'string');
@@ -5520,7 +5675,7 @@ async function resolvePlacedDevice(snapshot: Record<string, unknown>): Promise<D
 		if (before.length > 0) {
 			return {
 				reason: pool.length === 0
-					? `matched ${before.length} device(s) by ${via} but NONE carries the instance footprint "${fpIdentity}" (package-variant mismatch; names compared case-insensitively)`
+					? `matched ${before.length} device(s) by ${via} but NONE carries the instance footprint "${fpIdentity}" (package-variant mismatch; instance footprint uuid=${JSON.stringify(instanceFp.uuid)}, libraryUuid=${JSON.stringify(instanceFp.libraryUuid)}; UUID/library identity takes priority over name)`
 					: `${pool.length} devices match by ${via} + footprint — ambiguous`,
 				candidates: before.slice(0, 5).map(asCandidate),
 			};
@@ -5531,7 +5686,7 @@ async function resolvePlacedDevice(snapshot: Record<string, unknown>): Promise<D
 	const supplierId = typeof snapshot.supplierId === 'string' ? snapshot.supplierId : '';
 	if (/^C\d+$/.test(supplierId)) {
 		try {
-			const raw = (await eda.lib_Device.getByLcscIds([supplierId])) as unknown as Array<Record<string, unknown>>;
+			const raw = (await eda.lib_Device.getByLcscIds([supplierId], undefined, true)) as unknown as Array<Record<string, unknown>>;
 			const r = finish(Array.isArray(raw) ? raw : [], 'lcsc');
 			if (r) return r;
 		}
@@ -5728,7 +5883,7 @@ const schematicComponentReplace: Handler = async (payload) => {
 	else if (lcsc) {
 		let raw: Array<Record<string, unknown>>;
 		try {
-			raw = (await eda.lib_Device.getByLcscIds([lcsc])) as unknown as Array<Record<string, unknown>>;
+			raw = (await eda.lib_Device.getByLcscIds([lcsc], undefined, true)) as unknown as Array<Record<string, unknown>>;
 		}
 		catch (err) {
 			throw edaError(err, `Failed to resolve LCSC id "${lcsc}".`);

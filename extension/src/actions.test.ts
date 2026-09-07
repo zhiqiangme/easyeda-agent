@@ -10,6 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import JSZip from 'jszip';
 
 import {
 	connectPinEndpoint,
@@ -2388,6 +2389,22 @@ test('resolve_lcsc: a lone wrong UUID is refused before apply even when the inst
 	finally { delete (globalThis as any).eda; }
 });
 
+test('resolve_lcsc: unresolved candidates expose the conflicting footprint identities, not only equal names', async () => {
+ const mock = resolveLcscEda({ uuid: 'FP-INSTANCE', libraryUuid: 'LIB-F', name: 'R0603' });
+ const hits = await mock.lib_Device.search();
+ mock.lib_Device.search = async () => [{ ...hits[0], footprint: { uuid: 'FP-LIBRARY', libraryUuid: 'LIB-F', name: 'R0603' } }];
+ (globalThis as any).eda = mock;
+ try {
+  const res: any = await runAction('schematic.component.resolve_lcsc', {});
+  assert.equal(res.result.unresolvedCount, 1, 'same-name differing identities must still refuse');
+  assert.match(res.result.unresolved[0].reason, /instance footprint uuid="FP-INSTANCE", libraryUuid="LIB-F"/);
+  assert.deepEqual(res.result.unresolved[0].candidates[0], {
+   name: 'RC0603FR-0710KL', lcsc: 'C98220', uuid: 'DEV-0603', libraryUuid: 'LIB-1',
+   footprintName: 'R0603', footprintUuid: 'FP-LIBRARY', footprintLibraryUuid: 'LIB-F',
+  });
+ } finally { delete (globalThis as any).eda; }
+});
+
 test('resolve_lcsc: current SDK nested names use the same trimmed case-insensitive fallback', async () => {
 	const mock = resolveLcscEda({ name: ' r0603 ' });
 	const hits = await mock.lib_Device.search();
@@ -2402,6 +2419,191 @@ test('resolve_lcsc: current SDK nested names use the same trimmed case-insensiti
 	}
 	finally { delete (globalThis as any).eda; }
 });
+
+// Captured identity shape from the Hongen U1 page: public-library provenance,
+// but project-instance (16-hex) device/footprint IDs. No editor is used here.
+const identityLibrary = '0819f05c4eef4c71ace90d822a990e87';
+const identityDevice = '9f9c6cb41c7449fd8acf96aceed2661a';
+const identityFootprint = '20c29e37a9b84b4197418483096f9c05';
+const identityPackage = 'SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR';
+
+function nativeIdentitySource(instanceUuid: string, uuid: string, libraryUuid = identityLibrary): any {
+	return {
+		footprintUuid: instanceUuid,
+		documentSource: `${JSON.stringify({ type: 'DOCHEAD' })}||${JSON.stringify({ docType: 'FOOTPRINT', uuid: instanceUuid })}|\n`
+			+ `${JSON.stringify({ type: 'META', id: 'META' })}||${JSON.stringify({ title: identityPackage, source: `${uuid}|${libraryUuid}` })}|\n`,
+	};
+}
+
+function instanceIdentityEda(): any {
+	const state: Record<string, unknown> = {
+		ComponentType: 'part', Designator: 'U1', Name: '={Manufacturer Part}',
+		ManufacturerId: 'AMS1117-3.3', SupplierId: 'C6186',
+		Component: { uuid: '6e8a0f3cb342d055', libraryUuid: identityLibrary, name: 'AMS1117-3.3_C6186' },
+		Footprint: { uuid: 'abe23dba1def1246', libraryUuid: identityLibrary, name: identityPackage },
+	};
+	const hit: Record<string, unknown> = {
+		uuid: identityDevice, libraryUuid: identityLibrary, supplierId: 'C6186', manufacturerId: 'AMS1117-3.3',
+		footprintUuid: identityFootprint, footprintName: identityPackage,
+	};
+	const detail: Record<string, unknown> = {
+		uuid: identityDevice, libraryUuid: identityLibrary, name: 'AMS1117-3.3_C6186',
+		property: { supplierId: 'C6186', manufacturerId: 'AMS1117-3.3' },
+		association: { footprint: { uuid: identityFootprint, libraryUuid: identityLibrary } },
+	};
+	const calls: unknown[] = [];
+	const nativeSources = [nativeIdentitySource('abe23dba1def1246', identityFootprint)];
+	return {
+		state, hit, detail, calls, nativeSources,
+		dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: 'project-identity-test' }) },
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: '1234567890abcdef' }) },
+		sys_FileManager: { getDocumentFootprintSources: async () => { calls.push(['getDocumentFootprintSources']); return nativeSources; } },
+		sch_PrimitiveComponent: { getAll: async () => [mockComponent(state)] },
+		lib_Device: {
+			getByLcscIds: async (...args: unknown[]) => { calls.push(['getByLcscIds', ...args]); return [hit]; },
+			get: async (...args: unknown[]) => { calls.push(['get', ...args]); return detail; },
+			search: async () => { throw new Error('must not replace an incomplete exact-LCSC inventory with a search'); },
+		},
+	};
+}
+
+async function readInstanceIdentity(mock: any): Promise<any> {
+	(globalThis as any).eda = mock;
+	try {
+		const res: any = await schematicComponentsList({ includeDeviceIdentity: true });
+		return res.result.components[0];
+	} finally { delete (globalThis as any).eda; }
+}
+
+test('device identity: 16-hex project footprint resolves only with native source + full LCSC + official association', async () => {
+	const mock = instanceIdentityEda();
+	(mock.state.Footprint as any).name = ` ${identityPackage.toLowerCase()} `;
+	const part = await readInstanceIdentity(mock);
+	assert.equal(part.device.uuid, identityDevice);
+	assert.equal(part.placedDevice.uuid, '6e8a0f3cb342d055');
+	assert.equal(part.footprint.uuid, 'abe23dba1def1246', 'instance identity is retained, never overwritten with an inferred asset');
+	assert.equal(part.deviceResolution.via, 'lcsc-footprint-source');
+	assert.equal(part.deviceResolution.sameFootprintUUID, true);
+	assert.deepEqual(part.deviceResolution.footprintSource, { instanceUuid: 'abe23dba1def1246', uuid: identityFootprint, libraryUuid: identityLibrary });
+	assert.deepEqual(mock.calls, [
+		['getDocumentFootprintSources'],
+		['getByLcscIds', ['C6186'], undefined, true],
+		['get', identityDevice, identityLibrary],
+	]);
+});
+
+test('device identity: Hongen C2 flattened search footprint gains asset-library evidence from device.get', async () => {
+	const mock = instanceIdentityEda();
+	mock.state.Designator = 'C2'; mock.state.Name = '={Value}'; mock.state.ManufacturerId = 'GRM21BR61H106KE43L'; mock.state.SupplierId = 'C440198';
+	mock.state.Component = { uuid: 'dc16e8d0f259b0b7', libraryUuid: identityLibrary, name: 'GRM21BR61H106KE43L' };
+	mock.state.Footprint = { uuid: '6f7ca9a9603aeb19', libraryUuid: identityLibrary, name: 'C0805' };
+	mock.nativeSources.splice(0, 1, nativeIdentitySource('6f7ca9a9603aeb19', 'ccb32feceadc4298b406326a506ce8e7'));
+	Object.assign(mock.hit, { uuid: '6e5726223dd84f70bc3b626fc7d1f72c', supplierId: 'C440198', manufacturerId: 'GRM21BR61H106KE43L', footprintName: 'C0805', footprintUuid: 'ccb32feceadc4298b406326a506ce8e7' });
+	Object.assign(mock.detail, { uuid: mock.hit.uuid, property: { supplierId: 'C440198', manufacturerId: 'GRM21BR61H106KE43L' }, association: { footprint: { uuid: mock.hit.footprintUuid, libraryUuid: identityLibrary } } });
+	const part = await readInstanceIdentity(mock);
+	assert.equal(part.device.uuid, mock.hit.uuid);
+	assert.equal(part.deviceResolution.via, 'lcsc-footprint-source');
+});
+
+test('device identity: exact native footprint source outranks a renamed package label', async () => {
+	const mock = instanceIdentityEda(); mock.hit.footprintName = 'different-authored-display-name';
+	assert.equal((await readInstanceIdentity(mock)).device.uuid, identityDevice);
+});
+
+test('device identity: native inventory is fetched once per list and refreshed on the next call', async () => {
+	const mock = instanceIdentityEda();
+	mock.sch_PrimitiveComponent.getAll = async () => [mockComponent(mock.state), mockComponent({ ...mock.state, Designator: 'U2' })];
+	await readInstanceIdentity(mock); await readInstanceIdentity(mock);
+	assert.equal(mock.calls.filter((c: any) => c[0] === 'getDocumentFootprintSources').length, 2);
+});
+
+test('device identity: schematic empty source API falls back to the official current-project epro2 archive', async () => {
+	const mock = instanceIdentityEda();
+	const zip = new JSZip();
+	zip.file('current-project.epru', mock.nativeSources[0].documentSource + '{"type":"DOCHEAD"}||{"docType":"SCH_PAGE","uuid":"1234567890abcdef"}|\n');
+	const file = new Blob([await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' })]);
+	mock.sys_FileManager.getDocumentFootprintSources = async () => [];
+	mock.sys_FileManager.getProjectFile = async (...args: unknown[]) => { mock.calls.push(['getProjectFile', ...args]); return file; };
+	const part = await readInstanceIdentity(mock);
+	assert.equal(part.device.uuid, identityDevice);
+	assert.equal(part.deviceResolution.via, 'lcsc-footprint-source');
+	assert.deepEqual(mock.calls[0], ['getProjectFile', 'easyeda-agent-identity.epro2', undefined, 'epro2']);
+});
+
+test('device identity: stable exact device name is allowed only when the instance has no MPN', async () => {
+	const mock = instanceIdentityEda(); mock.state.ManufacturerId = '';
+	delete mock.hit.manufacturerId; mock.hit.name = 'AMS1117-3.3_C6186'; delete mock.detail.property.manufacturerId;
+	const part = await readInstanceIdentity(mock);
+	assert.equal(part.device.uuid, identityDevice);
+});
+
+test('device identity: duplicate rows for one proven library device do not invent a second candidate', async () => {
+	const mock = instanceIdentityEda(); mock.lib_Device.getByLcscIds = async () => [mock.hit, { ...mock.hit }];
+	assert.equal((await readInstanceIdentity(mock)).device.uuid, identityDevice);
+});
+
+test('device identity: complete LCSC inventory with two proven devices stays ambiguous', async () => {
+	const mock = instanceIdentityEda(); const second = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+	mock.lib_Device.getByLcscIds = async (_: unknown, __: unknown, multi: boolean) => multi ? [mock.hit, { ...mock.hit, uuid: second }] : [mock.hit];
+	mock.lib_Device.get = async (uuid: string) => ({ ...mock.detail, uuid });
+	const part = await readInstanceIdentity(mock);
+	assert.equal(part.device.uuid, '6e8a0f3cb342d055');
+	assert.match(part.deviceIdentityError, /2 distinct devices.*ambiguous/);
+	assert.equal(part.deviceIdentityCandidates.length, 2);
+});
+
+const invalidInstanceIdentityCases: Array<[string, (mock: any) => void]> = [
+	['different 32-hex footprint UUIDs even with the same package name', m => { m.state.Footprint.uuid = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'; }],
+	['unclassified device UUID domain', m => { m.state.Component.uuid = 'unclassified'; }],
+	['candidate footprint is not 32 hex', m => { m.hit.footprintUuid = 'abe23dba1def1246'; }],
+	['missing source footprint asset library', m => { delete m.state.Footprint.libraryUuid; }],
+	['wrong source footprint asset library', m => { m.state.Footprint.libraryUuid = 'different-asset-library'; }],
+	['same asset UUID with conflicting candidate library', m => { m.hit.footprintLibraryUuid = 'different-asset-library'; }],
+	['native source identifies a different asset despite equal package names', m => { m.nativeSources[0] = nativeIdentitySource('abe23dba1def1246', 'cccccccccccccccccccccccccccccccc'); }],
+	['native source library conflicts despite equal package names', m => { m.nativeSources[0] = nativeIdentitySource('abe23dba1def1246', identityFootprint, 'different-library'); }],
+	['native source API is absent; name-only evidence cannot hydrate', m => { delete m.sys_FileManager; }],
+	['native source query fails; name-only evidence cannot hydrate', m => { m.sys_FileManager.getDocumentFootprintSources = async () => { throw new Error('source unavailable'); }; }],
+	['native source inventory is empty', m => { m.nativeSources.length = 0; }],
+	['native source document is malformed', m => { m.nativeSources[0].documentSource = 'not native source'; }],
+	['source project context is missing', m => { delete m.dmt_Project; }],
+	['source page changes after component snapshot', m => {
+		let reads = 0;
+		m.dmt_SelectControl.getCurrentDocumentInfo = async () => ({ uuid: ++reads === 1 ? '1234567890abcdef' : 'other-page' });
+	}],
+	['source project changes during export', m => {
+		let project = 'project-identity-test';
+		m.dmt_Project.getCurrentProjectInfo = async () => ({ uuid: project });
+		m.sys_FileManager.getDocumentFootprintSources = async () => { project = 'other-project'; return m.nativeSources; };
+	}],
+	['search LCSC contradicts the exact requested C-number', m => { m.hit.supplierId = 'C9999'; }],
+	['search MPN mismatch is not rescued by same name', m => { m.hit.manufacturerId = 'ams1117-3.3'; }],
+	['official get returns the wrong device', m => { m.detail.uuid = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; }],
+	['official get returns the wrong device library', m => { m.detail.libraryUuid = 'different-device-library'; }],
+	['official get association footprint conflicts', m => { m.detail.association.footprint.uuid = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; }],
+	['official get association source is absent', m => { delete m.detail.association.footprint.libraryUuid; }],
+	['official get is absent', m => { m.lib_Device.get = async () => undefined; }],
+	['official get fails', m => { m.lib_Device.get = async () => { throw new Error('offline'); }; }],
+	['official get LCSC contradicts search', m => { m.detail.property.supplierId = 'C9999'; }],
+	['official get MPN differs', m => { m.detail.property.manufacturerId = 'AMS1117-5.0'; }],
+	['official get MPN is missing', m => { delete m.detail.property.manufacturerId; }],
+	['only a formula name exists without MPN', m => { m.state.ManufacturerId = ''; m.state.Component.name = '={Value}'; }],
+	['stable name is exact, not casefolded', m => { m.state.ManufacturerId = ''; m.detail.name = 'ams1117-3.3_c6186'; }],
+	['complete lookup fails', m => { m.lib_Device.getByLcscIds = async () => { throw new Error('inventory unavailable'); }; }],
+	['another plausible candidate cannot be read', m => {
+		const second = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+		m.lib_Device.getByLcscIds = async () => [m.hit, { ...m.hit, uuid: second }];
+		m.lib_Device.get = async (uuid: string) => uuid === second ? undefined : m.detail;
+	}],
+];
+for (const [reason, alter] of invalidInstanceIdentityCases) {
+	test(`device identity: refuses ${reason}`, async () => {
+		const mock = instanceIdentityEda(); alter(mock);
+		const part = await readInstanceIdentity(mock);
+		assert.equal(part.device.uuid, mock.state.Component.uuid);
+		assert.ok(part.deviceIdentityError, 'identity remains unresolved instead of hydrating an unsupported library asset');
+		assert.equal(part.deviceResolution, undefined);
+	});
+}
 
 test('resolve_lcsc: batch cache keeps same-named footprint UUIDs and libraries separate when applying', async () => {
 	const footprints = [

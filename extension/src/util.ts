@@ -589,12 +589,118 @@ export function footprintNameEquals(a: unknown, b: unknown): boolean {
 
 /** Normalize current SDK footprint refs and legacy flattened device records. */
 export function readDeviceFootprint(device: Record<string, unknown>): { uuid: string; libraryUuid: string; name: string } {
-	const nested = device.footprint;
+	const association = device.association && typeof device.association === 'object'
+		? device.association as Record<string, unknown> : undefined;
+	const nested = device.footprint ?? association?.footprint;
 	const ref = nested && typeof nested === 'object' && !Array.isArray(nested)
 		? nested as Record<string, unknown>
-		: { uuid: device.footprintUuid, libraryUuid: device.footprintLibraryUuid, name: device.footprintName };
+		: { uuid: device.footprintUuid ?? association?.footprintUuid, libraryUuid: device.footprintLibraryUuid, name: device.footprintName };
 	const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 	return { uuid: text(ref.uuid), libraryUuid: text(ref.libraryUuid), name: text(ref.name) };
+}
+
+export interface NativeFootprintSource {
+	instanceUuid: string;
+	uuid: string;
+	libraryUuid: string;
+	sourceKind?: 'project-epro2';
+}
+
+/** Extract only footprint identity metadata from a current native project export.
+ * The current SCH_PAGE must occur exactly once; this prevents accepting a source
+ * export from a different active document as the current page's identity evidence.
+ */
+export function projectFootprintSourceInventory(
+	text: string,
+	documentUuid: string,
+): Array<{ footprintUuid: string; documentSource: string; sourceKind: 'project-epro2' }> {
+	if (!documentUuid || text.length > 64 * 1024 * 1024) throw new Error('native project source is missing its target or exceeds 64 MiB');
+	const rows = text.split(/\r?\n/);
+	if (rows.length > 200000) throw new Error('native project source exceeds 200000 rows');
+	let lastRow = rows.length - 1;
+	while (lastRow >= 0 && !rows[lastRow].trim()) lastRow--;
+	const inventory: Array<{ footprintUuid: string; documentSource: string; sourceKind: 'project-epro2' }> = [];
+	let current: { footprintUuid: string; documentSource: string; sourceKind: 'project-epro2' } | undefined;
+	let targetPages = 0;
+	for (const [rowIndex, raw] of rows.entries()) {
+		let line = raw.trim();
+		if (!line) continue;
+		const delimiter = line.indexOf('||');
+		if (delimiter < 0) throw new Error('malformed native project source row');
+		if (!line.endsWith('|')) {
+			if (rowIndex !== lastRow) throw new Error('unterminated native project source row before EOF');
+			JSON.parse(line.slice(delimiter + 2)); // Official epru may omit the final record separator.
+			line += '|';
+		}
+		const header = JSON.parse(line.slice(0, delimiter)) as Record<string, unknown>;
+		if (header.type === 'DOCHEAD') {
+			const payload = JSON.parse(line.slice(delimiter + 2, -1)) as Record<string, unknown>;
+			current = undefined;
+			if (payload.docType === 'SCH_PAGE' && payload.uuid === documentUuid) targetPages++;
+			if (payload.docType === 'FOOTPRINT') {
+				if (typeof payload.uuid !== 'string') throw new Error('footprint DOCHEAD has no instance UUID');
+				current = { footprintUuid: payload.uuid, documentSource: line + '\n', sourceKind: 'project-epro2' };
+				inventory.push(current);
+				if (inventory.length > 2048) throw new Error('native project exceeds 2048 footprint documents');
+			}
+		} else if (current && header.type === 'META') {
+			current.documentSource += line + '\n';
+		}
+	}
+	if (targetPages !== 1) throw new Error(`native project contains ${targetPages} matching SCH_PAGE documents; one is required`);
+	return inventory;
+}
+
+/** Read an exact origin from the official per-document footprint source inventory.
+ * Never scan arbitrary text for a source string: it must belong to the single
+ * FOOTPRINT DOCHEAD identified by this API entry and its following unique META.
+ */
+export function readNativeFootprintSource(
+	inventory: unknown,
+	instanceUuid: string,
+): { source?: NativeFootprintSource; error?: string } {
+	const object = (v: unknown): Record<string, unknown> | undefined =>
+		v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
+	if (!/^[0-9a-f]{16}$/i.test(instanceUuid) || !Array.isArray(inventory)) return { error: 'native footprint source inventory unavailable' };
+	const matching = inventory.filter(item => object(item)?.footprintUuid === instanceUuid);
+	if (matching.length !== 1) return { error: `native footprint source inventory has ${matching.length} entries for ${instanceUuid}; one is required` };
+	const text = object(matching[0])?.documentSource;
+	if (typeof text !== 'string' || !text.trim()) return { error: `native footprint source is empty for ${instanceUuid}` };
+	let heads = 0;
+	let metas = 0;
+	let source: NativeFootprintSource | undefined;
+	try {
+		const rows = text.split(/\r?\n/);
+		let lastRow = rows.length - 1;
+		while (lastRow >= 0 && !rows[lastRow].trim()) lastRow--;
+		for (const [rowIndex, rawLine] of rows.entries()) {
+			let line = rawLine.trim();
+			if (!line) continue;
+			const delimiter = line.indexOf('||');
+			if (delimiter < 0 || (!line.endsWith('|') && rowIndex !== lastRow)) throw new Error('malformed native row');
+			if (!line.endsWith('|')) line += '|';
+			const header = object(JSON.parse(line.slice(0, delimiter)));
+			const payload = object(JSON.parse(line.slice(delimiter + 2, -1)));
+			if (!header || !payload) throw new Error('native row is not a pair of objects');
+			if (header.type === 'DOCHEAD') {
+				heads++;
+				if (heads !== 1 || payload.docType !== 'FOOTPRINT' || payload.uuid !== instanceUuid) throw new Error('DOCHEAD does not identify exactly this footprint');
+			} else if (header.type === 'META') {
+				metas++;
+				if (heads !== 1 || metas !== 1) throw new Error('META must uniquely follow the footprint DOCHEAD');
+				const parsed = typeof payload.source === 'string' ? /^([0-9a-f]{32})\|([^|\s]+)$/i.exec(payload.source) : null;
+				if (!parsed) throw new Error('META.source is not a 32-hex asset UUID and explicit library');
+				source = {
+					instanceUuid, uuid: parsed[1], libraryUuid: parsed[2],
+					...(object(matching[0])?.sourceKind === 'project-epro2' ? { sourceKind: 'project-epro2' as const } : {}),
+				};
+			}
+		}
+		if (heads !== 1 || metas !== 1 || !source) throw new Error('footprint DOCHEAD/META.source evidence is incomplete');
+		return { source };
+	} catch (err) {
+		return { error: `invalid native footprint source for ${instanceUuid}: ${err instanceof Error ? err.message : 'parse failed'}` };
+	}
 }
 
 /**

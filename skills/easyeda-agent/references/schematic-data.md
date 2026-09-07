@@ -24,6 +24,20 @@ Connectivity JSON 顶层为 `schemaVersion:"1.4"`、`projectId/documentId`、
 未绑定旧图兼容用 `cmp-<ref>` 初始化一次。改名之后保留旧 ID，不重新造 ID，
 不覆盖原生 `uniqueId`（它可能关联 PCB）。
 
+旧连接器可能把 16 位放置实例的 `device/footprint.uuid` 与 32 位库资产 UUID 直接比较，
+导致同名封装全部报 `package-variant mismatch`。`sch list --include-device-identity` 与
+Apply 写前/写后回读共用 CLI 兼容解析：用官方 `getDocumentFootprintSources()` 的
+FOOTPRINT `DOCHEAD` 和唯一 `META.source` 证明实例封装到库资产的出处。部分版本在
+原理图页返回空数组，此时从官方 `getProjectFile(..., 'epro2')` 的当次工程导出中只读提取
+同样的出处；前后工程/页面必须一致，源码必须唯一包含当前页面，ZIP 和解压大小受限。
+不读取历史备份替代当前状态，也不在编辑器内保存临时工程。随后请求全部
+精确 LCSC 候选，并用 `lib_Device.get` 核对型号/稳定名称及关联封装 UUID、库来源。
+唯一匹配才恢复器件库身份；输出 `deviceResolution.via=lcsc-footprint-source` 和原连接器错误。
+这证明库资产出处，仍不代替引脚、XY、连线及最终图面回读；不把相同封装名作为重建依据。
+两个 32 位资产 UUID 冲突、缺原生出处、来源不符、多候选或查询/证据缺失均拒绝，
+不能手改快照清除错误。旧连接器的兼容查询只运行固定官方读取脚本；dry-run 不派发
+该 debug 查询，也不降低身份门禁。
+
 ## 选择转换入口
 
 | 需求 | CLI 与边界 |
