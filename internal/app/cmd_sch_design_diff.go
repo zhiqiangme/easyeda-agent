@@ -1,0 +1,72 @@
+package app
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/spf13/cobra"
+	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+)
+
+func newSchDesignDiffCmd(stdout, stderr io.Writer) *cobra.Command {
+	var exitCode bool
+	c := &cobra.Command{
+		Use:   "design-diff <expected.json> <actual.json>",
+		Short: "Compare local schematic identity, connectivity, geometry and complete compose plans",
+		Long: `Compare strict 1.4 canonical JSON or the connectivity in a compose source/plan.
+Two complete compose plans also compare sheet, keepouts, placements, wires, flags,
+frames, title styling and modeled occupancy. Plans are local intent, not proof of
+actual EDA drawing. A plan versus canonical readback compares canonical data only.
+
+Stable component/pin/net IDs determine matches; inventory ordering is ignored.
+Module reading order and wire path shape remain meaningful; reversing an entire
+wire path is equivalent. Derived issues and runtime primitiveId are ignored. Missing coordinate evidence remains unverified, never an observed zero.
+Hashes cover normalized content within coverage.scope; only equal covered data
+is "synced". Missing drawing evidence is always reported, even if canonical data
+matches. Use fresh EDA readback and frame check/export-image to verify the editor.
+
+Exit codes: 0 comparison completed; 2 different with --exit-code; 3 wrong target
+or incomplete canonical evidence; 1 malformed input or operational error.`,
+		Example: "  easyeda sch design-diff target-plan.json observed-connectivity.json --exit-code\n  easyeda sch design-diff previous-plan.json next-plan.json --exit-code",
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var inputs [2]schDesignInput
+			for i, path := range args {
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				inputs[i], err = decodeSchDesignInput(raw)
+				if err != nil {
+					var incomplete *connectivity.IncompleteDesignError
+					if errors.As(err, &incomplete) {
+						fmt.Fprintf(stderr, "%s: %v\n", path, err)
+						return exitCodeError{3}
+					}
+					return fmt.Errorf("read %s: %w", path, err)
+				}
+			}
+			diff, err := compareSchDesignInputs(inputs[0], inputs[1])
+			if err != nil {
+				return err
+			}
+			encoder := json.NewEncoder(stdout)
+			encoder.SetIndent("", "  ")
+			if err = encoder.Encode(diff); err != nil {
+				return err
+			}
+			if diff.Status == "wrong-target" || diff.Status == "incomplete" {
+				return exitCodeError{3}
+			}
+			if exitCode && diff.Status == "different" {
+				return exitCodeError{2}
+			}
+			return nil
+		},
+	}
+	c.Flags().BoolVar(&exitCode, "exit-code", false, "exit 2 when compared design states differ (incomplete evidence always exits 3)")
+	return c
+}

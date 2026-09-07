@@ -44,7 +44,7 @@ easyeda <domain> <action> [flags]
 
 ## 1.4 当前接口
 
-原理图以 `sch connectivity/designators/compose/frame/apply` 组织数据、规划与执行，
+原理图以 `sch connectivity/design-diff/designators/compose/frame/apply` 组织数据、规划与执行，
 PCB 保持在 `pcb` 域。CLI → daemon → connector 是唯一运行链路，不设 Broker 层。
 `easyeda actions` 与各子命令 `--help` 提供当前完整清单，不在文档重复登记数量。
 

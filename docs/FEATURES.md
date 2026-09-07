@@ -5,8 +5,9 @@
 ## 当前基线
 
 - 原理图：以 Connectivity IR（器件、引脚、网络、pin-to-net）为电气事实，布局与 Lib 模块复用不得改变连接核心。
+- 本地设计比较：`sch design-diff` 按稳定ID核对完整canonical字段与两份compose计划的图形数据，报告内容哈希和未验证范围。
 - 固定 LDO 样例：`sch power-layout` 根据实测 pin/bbox 离线计算四器件位置、直连导线及 `sch apply` 队列；`expectSchematic` 校验移动前后几何与完整引脚网表。[验收及范围](power-layout-validation.md)。
-- 模块呈现：`sch frame apply/check` 将 JSON 转换成粉色虚线框和 0.2 inch 标题,回读样式/实际文字边界并保持重复执行幂等。标题按分项占位选择上下空档压缩框高度,可用实测文字尺寸规划、携带预测包络与障碍物核验。各模块压缩后由共享 Z 字行规划器从左上起排、统一行高;固定贴边尺寸10 raw（2.54mm）。[转换契约](schematic-frame-conversion.md)。
+- 模块呈现：`sch frame apply/check` 将 JSON 转换成粉色虚线框和 0.2 inch 标题,回读样式/实际文字边界并保持重复执行幂等。标题按分项占位选择上下空档压缩框高度,可用实测文字尺寸规划、携带预测包络与障碍物核验。各模块压缩后由共享 Z 字行规划器从左上起排、同行顶齐、各框保留自身高度；相对实测sheetBorder保留最小10 raw净距。[转换契约](schematic-frame-conversion.md)。
 - 单页组合：`sch compose` 以完整 IR 和实测 Lib 几何生成同页位置及严格 Apply 队列；校验实际 bbox、全部 pin/net/NC、导线路径和标记方向。跨页位号须唯一，不自动删除源页。[组合契约](schematic-page-composition.md)。
 - 位号：`sch designators allocate/plan/verify` 按官方库前缀修复非标准名称，保留合法编号与稳定 ID；原地队列核对位置、引脚/网络/NC、导线与全工程位号。[使用合同](../skills/easyeda-agent/references/schematic-data.md)。
 - PCB：`layout-lint` 负责硬门，`layout-score` 负责质量维度；`pcb check` 与 DRC 负责制造和电气约束。

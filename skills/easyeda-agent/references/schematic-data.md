@@ -31,6 +31,7 @@ Connectivity JSON 顶层为 `schemaVersion:"1.4"`、`projectId/documentId`、
 | 读取连接图 | `sch connectivity [--page <page> | --all-pages]`；跨页导出逐页激活读取，避免只取得浅层引脚信息。 |
 | 本地连接差异 | `sch connectivity-diff before.json after.json`；检查组件/网络增删、连接及 NC 差异，不代替器件库身份与几何校验。 |
 | 非标准位号修复 | `sch designators allocate` 分配，`plan` 编译原地修改队列，`verify` 执行前后校验。 |
+| 本地设计版本差异 | `sch design-diff expected.json actual.json --exit-code`；比较 canonical 或完整 compose 计划，输出稳定 ID 差异、修订哈希和证据覆盖范围。 |
 | 完整 Lib 图面 | `sch compose`：完整连接核心与局部几何 → 单页布局与受保护 Apply。 |
 | 基础放置 | `sch materialize`：已知库身份和 placement → 放件队列，可选逐脚标记。它不是完整模块绘图器。 |
 | 明确的标记增量 | `sch plan before.json after.json`：仅新增指定 kind 的电源/地/网络端口连接；不支持任意器件更改、删网或重接。 |
@@ -40,8 +41,20 @@ Connectivity JSON 顶层为 `schemaVersion:"1.4"`、`projectId/documentId`、
 ### 本地版本与 EDA 回读对账
 
 先按稳定组件 ID/引脚号匹配同一工程与页，再分别检查拓扑、ref/库身份、placement/bbox/pins。
-`connectivity-diff` 返回 `{}` 不涵盖后两类；1.4.2 尚无完整设计版本比较命令，可用保留的本地
-比较脚本补查字段。导线、框与文字还需图元快照，不能把导出中未包含的字段当作“相同”。
+`connectivity-diff` 返回 `{}` 不涵盖后两类；使用 `design-diff` 补查字段。完整 compose
+计划还可比较导线、标记、框与标题；只提供 canonical 数据时这些图形必须列为未验证，
+不能把导出中未包含的字段当作“相同”。新命令属于后续源码，原发布版 1.4.2 不含此能力。
+`status` 为 `synced` / `different` / `wrong-target` / `incomplete`。
+`expectedRevision/actualRevision` 是 `coverage.scope` 内规范化内容的哈希；运行态 primitiveId、
+库存数组顺序和整条导线的正反遍历不计差异，模块阅读顺序及实际折线路径会比较。
+退出码：0 表示比较执行完；有 `--exit-code` 且内容不同为 2；目标不符或 canonical 证据不完整为 3；
+非法输入/读文件失败为 1。始终检查 `coverage.unverified`，不能只以退出码 0 声称现场完整同步。
+
+```bash
+easyeda sch design-diff target-plan.json observed-connectivity.json --exit-code
+easyeda sch design-diff previous-plan.json next-plan.json --exit-code
+```
+
 模块局部坐标与整页坐标不同，现场应对照 `compose` 输出的目标坐标，不能直接比较源局部坐标。
 
 保留本地目标和新导出两份文件，记录来源及采集时间。文件较新或连接相同不代表已经同步；
