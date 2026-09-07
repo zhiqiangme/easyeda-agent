@@ -37,8 +37,10 @@ typed CLI 操作嘉立创EDA专业版的原理图——每个动作可观测、�
 
 | 能力 | 命令 | 说明 |
 |---|---|---|
-| 单页 Lib 组合 | `sch compose --from ... --out ... --before ... --playbook ... [--replace]` | 保留原位号；完整IR与模块几何→端子直线错长、紧凑标题、Z等高排布、固定10 raw边距；实际引脚/NC/bbox/导线路径回读。跨页位号唯一才许重建；[范围](../schematic-page-composition.md) |
-| 固定 LDO 数据规划 | `sch power-layout --from ... --out ... --playbook ...` | 实测几何→器件/引脚/线/电源符号/模块框;标题择上下空档压缩包络后,默认左上 Z 字起排、统一行高;输入可带实测 `titleMetrics`;`--frames-only` 只验证并补框 |
+| 本地设计对账 | `sch design-diff expected.json actual.json --exit-code` | 按稳定ID核对器件、引脚、网、几何；两份完整compose计划还比较导线、框和标题，报告覆盖范围及未验证项 |
+| Lib 内部计算 | `sch lib-layout --from ... --out ...` | 既定电路图与实测姿态→局部位置、短线和电源地；有界搜索，输出compose输入 |
+| 单页 Lib 组合 | `sch compose --from ... --out ... --before ... --playbook ... [--replace]` | 保留原位号；完整IR与模块几何→端子直线错长、紧凑标题、Z字紧凑框排布、固定10 raw边距（实测sheetBorder可核验内框净距）；实际引脚/NC/bbox/导线路径回读。跨页位号唯一才许重建；[范围](../schematic-page-composition.md) |
+| 固定 LDO 数据规划 | `sch power-layout --from ... --out ... --playbook ...` | 实测几何→器件/引脚/线/电源符号/模块框;标题择上下空档压缩包络后,默认左上 Z 字起排、同行顶齐、每框保持自身高度;输入可带实测 `titleMetrics`;`--frames-only` 只验证并补框 |
 | 模块呈现转换 | `sch frame apply/check --from ...` | JSON→粉色虚线框+0.2 inch 标题;按页面和模块记录 ID,回读样式/实际文字边界;可选 `titleLayout` 核验预测包络和障碍物净距,重复 Apply 不增图元 |
 | 模块感知自动布局 | `sch autolayout` | 双引擎:`template`(spec 驱动,核心放分区中心+外围环绕,确定性,布线前用)/ `official`(平台 @beta 兜底,破坏性,`--rewire` 网表重建) |
 | 空隙打包 | `sch autoplace-free` | 无分区场景往空白处塞件 |

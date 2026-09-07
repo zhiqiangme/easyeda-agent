@@ -12,6 +12,7 @@
 | 离线比较连接 | `sch connectivity-diff <before.json> <after.json>` |
 | 修复功能式位号 | `sch designators allocate` → `plan` → `sch apply` |
 | 完整本地版本比较 | `sch design-diff expected.json actual.json --exit-code`；检查 coverage/unverified |
+| 由测量计算 Lib 内部 | `sch lib-layout --from layout-input.json --out composition.json`；纯离线 |
 | 合并已设计的 Lib 几何 | `sch compose --from … --out … --before … --playbook …` |
 | 放置固定 IR 中的器件 | `sch materialize <connectivity.json> --out …`；不是完整布局/布线器 |
 | 少量显式标记连接增量 | `sch plan <before.json> <after.json>`；不支持任意器件或导线 diff |

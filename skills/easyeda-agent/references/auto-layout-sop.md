@@ -22,7 +22,9 @@ easyeda sch sheet-geometry --project <project> --doc <page> --json
 
 ## 2. 离线计算模块与单页组合
 
-先设计每个 Lib 的局部几何，再组合到纸张；先压缩上/下标题空档，再按功能顺序排等高 Z 字行。
+先用 `sch lib-layout` 计算每个 Lib 的局部几何，再组合到纸张；框按各自内容压缩上下空档，
+按功能顺序排 Z 字行，同行顶齐，下一行按上一行最高框推进，不统一拉高。
+提供实测 `sheetBorder` 后，虚线笔画到红色图纸内框最少留 10 raw。
 标题使用粉色 0.2 inch，方框使用粉色虚线；当前不生成 Notes。
 
 ```bash

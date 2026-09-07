@@ -53,10 +53,10 @@ PCB 操作分别读 [pcb-layout.md](./pcb-layout.md) 和 [pcb-routing.md](./pcb-
 标记；端子信号优先水平直出、按文字占用错开引线长度。不得为避碰改变电气网络。
 布局与呈现细节见 [schematic-placement.md](./schematic-placement.md)。
 
-Lib 内部几何由本地计算生成；`compose` 不从裸网表生成外围位置和接线。保留计算输入、
-脚本与参数，先重跑并核对不变量，再交给组合器。已有完整模块几何可以直接复用。
+Lib 内部几何用 `sch lib-layout` 从连接图、实测姿态与布局意图计算；`compose` 消费它的输出。
+保留输入和参数，先核对不变量，再交给组合器；需额外自编计算时保留脚本。已有完整模块几何可直接复用。
 
-`sch compose` 离线计算模块范围、标题空档和从左上开始的 Z 字行布局；同一行等高，
+`sch compose` 离线计算模块范围、标题空档和从左上开始的 Z 字行布局；每框保留内容高度、同行顶齐，按该行最高框换行；
 页边距与模块间距由当前算法固定为 10 raw（0.1 inch）。标题为 20 raw（0.2 inch），
 采用粉色虚线模块框；本版本不要求 Notes。纸张或模块放不下时修改数据与功能分组，
 不要通过反复落图试摆或放宽碰撞判据来推进。
@@ -80,7 +80,7 @@ Lib 内部几何由本地计算生成；`compose` 不从裸网表生成外围位
 
 ### S5 — 回读验证
 
-1. 导出新的 `sch connectivity`，用 `sch connectivity-diff` 对照目标 IR；确认器件、
+1. 导出新的 `sch connectivity`，用 `sch design-diff` 对照目标计划/IR，并核对 coverage/unverified；确认器件、
    引脚、网络和 NC 一致。跨页工程同时检查完整网络关系，不能只验当前页。
 2. 完整原理图验收对受影响页面运行 `sch gate --strict --json`。它按
    `layout-lint → check → bridge-check → drc` 执行，严格模式把间距、孤儿桩等告警

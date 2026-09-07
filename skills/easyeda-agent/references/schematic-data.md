@@ -30,8 +30,9 @@ Connectivity JSON 顶层为 `schemaVersion:"1.4"`、`projectId/documentId`、
 |---|---|
 | 读取连接图 | `sch connectivity [--page <page> | --all-pages]`；跨页导出逐页激活读取，避免只取得浅层引脚信息。 |
 | 本地连接差异 | `sch connectivity-diff before.json after.json`；检查组件/网络增删、连接及 NC 差异，不代替器件库身份与几何校验。 |
-| 非标准位号修复 | `sch designators allocate` 分配，`plan` 编译原地修改队列，`verify` 执行前后校验。 |
 | 本地设计版本差异 | `sch design-diff expected.json actual.json --exit-code`；比较 canonical 或完整 compose 计划，输出稳定 ID 差异、修订哈希和证据覆盖范围。 |
+| 从实测引脚计算 Lib 内部 | `sch lib-layout --from layout-input.json --out composition.json`；核心与外围的连接图、实测姿态及网络绘制策略 → 局部器件位置/短线/标记，再交给 compose。 |
+| 非标准位号修复 | `sch designators allocate` 分配，`plan` 编译原地修改队列，`verify` 执行前后校验。 |
 | 完整 Lib 图面 | `sch compose`：完整连接核心与局部几何 → 单页布局与受保护 Apply。 |
 | 基础放置 | `sch materialize`：已知库身份和 placement → 放件队列，可选逐脚标记。它不是完整模块绘图器。 |
 | 明确的标记增量 | `sch plan before.json after.json`：仅新增指定 kind 的电源/地/网络端口连接；不支持任意器件更改、删网或重接。 |
@@ -48,7 +49,8 @@ Connectivity JSON 顶层为 `schemaVersion:"1.4"`、`projectId/documentId`、
 `expectedRevision/actualRevision` 是 `coverage.scope` 内规范化内容的哈希；运行态 primitiveId、
 库存数组顺序和整条导线的正反遍历不计差异，模块阅读顺序及实际折线路径会比较。
 退出码：0 表示比较执行完；有 `--exit-code` 且内容不同为 2；目标不符或 canonical 证据不完整为 3；
-非法输入/读文件失败为 1。始终检查 `coverage.unverified`，不能只以退出码 0 声称现场完整同步。
+非法输入/读文件失败为 1。新建连接图尚未含 placement/bbox/pin XY 时，即使两份图相同也会返回
+`incomplete`（3）；这不等于网表错误，电气不变量可用 `connectivity-diff` 比较，几何须经计算或回读补齐。始终检查 `coverage.unverified`，不能只以退出码 0 声称现场完整同步。
 
 ```bash
 easyeda sch design-diff target-plan.json observed-connectivity.json --exit-code
@@ -95,6 +97,38 @@ easyeda sch apply rename.json --yes
 ref 引用也要按组件 ID 同步；不要对 JSON 做全局字符串替换，网络名和稳定 ID 不随之改名。
 `compose/materialize` 在生成放置队列前拒绝非标准 ref，防止错误源数据写回画布。
 
+## 由引脚计算 Lib 内部
+
+`sch lib-layout --from layout-input.json --out composition.json` 全程离线，输出直接供
+`sch compose` 使用，不生成或派发 EDA 操作。输入：
+
+- `schemaVersion:1`、完整 `connectivity`、实测 `sheet`、明确的 `keepouts` 数组。
+  可附 `sheetBorder` 指定实测图纸内边框；它不改变原纸张 bbox。
+- `measurements[]` 使用下表 `placements` 的实测格式。必须显式含 x/y、rotation/mirror、
+  bbox 四边、完整 pins（含 number/net/x/y）；NC 的 net 为空，朝向固定，不能将未知值填 0。
+- `layoutModules[]` 含 `id/title/coreComponentId/netPolicies`，覆盖所有 canonical Lib。
+  `coreComponentId` 必须是该模块的核心成员之一；其余核心与外围沿已知电气连接展开。
+  `netPolicies` 以**稳定 net ID**为键：`direct`/`module_port` 把该网连成真实线树，
+  `local_power`/`local_ground` 为每个独立线树就近放电源/地，已直连的外围不再各放一个标记。
+
+可选 `layoutModules[].peripherals[]` 为 `{componentId,pinNumber?,attachTo:{componentId,pinNumber}}`。
+前一个 pinNumber 选择外围脚，attachTo 选择同模块核心或外围的几何参考脚；两脚必须已经同网。
+例如两个 VOUT 都存在时可指定右侧那一脚摆电容，另一个 VOUT 仍按网络策略保留连接。
+没有提示时按已连接网络选择参考，优先内部信号，再考虑电源；纯地关系不推断功能搭档。
+串联支路按依赖顺序放置；环形提示、断开的模块或无法避碰的测量姿态返回具体未解决对象。
+
+核心归零后沿参考脚方向搜索，外围可正对或垂直于参考脚，全部 bbox/pin 随器件平移。
+候选保持 5 raw 网格，按连接总长递增，同长度优先直线，再检查正交折点；当前外向搜索至 400 raw、横向至 200 raw。
+可选 `maxCandidates` 限制整份输入的搜索次数（默认 20000，范围 1..1000000）；耗尽时明确报错，不写出半成品。
+这是有界、保持实测姿态的求解器，失败不证明电路在任意朝向下都无解。改变朝向须重新提供
+对应可信几何；不能放宽碰撞检查或修改网表来取得通过。已有手工设计好的 Lib 仍可直接 compose。
+
+```bash
+easyeda sch lib-layout --from layout-input.json --out composition.json
+easyeda sch compose --from composition.json --out plan.json
+# 完成现场取证后，按下文加入 --before/--playbook，最后 Apply。
+```
+
 ## Lib 组合输入
 
 `compose` 输入顶层使用 `schemaVersion:1`，内含上述 `connectivity`（版本仍是字符串 `"1.4"`）、
@@ -103,6 +137,7 @@ ref 引用也要按组件 ID 同步；不要对 JSON 做全局字符串替换，
 | 字段 | 格式 |
 |---|---|
 | `sheet` | `{minX,minY,maxX,maxY}`，目标纸张实际 bbox。坐标单位 raw = 0.01 inch，y 向上。 |
+| `sheetBorder` | 可选同格式 bbox，实际图纸内边框；模块虚线笔画在其内最少留 10 raw，考虑半线宽后向内取 5 raw 网格。缺少时输出 `sheet-bbox-fallback`，不能据此声称已验证红框净距。 |
 | `keepouts` | bbox 数组，例如图签；从 `sch sheet-geometry --json` 取得，保留其来源与警告。空数组表示已确认没有禁放区。 |
 | `modules[]` | `id/title/placements/wires/flags`，可附 `terminals/titleMetrics`；与 connectivity 的 Lib 成员逐项对应，每件只归属一个模块。 |
 | `placements[]` | `designator/value/x/y/rotation/mirror/bbox/pins`；bbox 与引脚位置来自官方实测，器件和引脚坐标落在 5 raw 网格。 |
@@ -116,7 +151,8 @@ ref 引用也要按组件 ID 同步；不要对 JSON 做全局字符串替换，
 跨模块信号使用网络端口。端子直出按 10～300 raw、5 raw 步进寻找最短合法直线，
 邻标签通过错落长短避让。无法直出就修源几何，不自动回退折线。
 
-组合器从模块上下空档选择标题位置，再从左上以 Z 字排列，使用最大模块高度统一行高。
+组合器从模块上下空档选择标题位置，再从左上以 Z 字排列。每个框按自己的内容保持紧凑高度，
+同行顶齐，下一行按上一行最高框推进；`rowHeights` 为各行推进高度，`rowHeight` 仅是最大值诊断。
 页边、框内最小边距、模块间距及标题内缩固定 10 raw，标题净距 5 raw；
 框为粉色 `#AA00AA` 虚线、无填充，标题为 20 raw。本版本无独立 Notes。
 它平移器件、引脚和线路，但不推断器件朝向或缩放符号。
