@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Validate CLI and Skill downloads before installation, honor explicit binary/client directories, and preserve shared Skill symlinks. Normal updates remove retired Skill files; preserve mode retains the previous version marker.
+- Return failure when an update fails, validate exact binary/Skill versions and checksum entries, and keep daemon startup Skill sync aligned with the running release. Reject unknown clients and relative client directories.
+
+### Validation
+
+- Add reusable release-asset and isolated CLI smoke checks, Bash installer failure regression tests, and native Ubuntu/macOS/Windows CI checks including real download, execution and replacement of a temporary binary. Only macOS execution has been verified locally; this does not constitute an EDA acceptance run.
+
 ## [1.4.2] — 2026-09-06
 
 ### Added

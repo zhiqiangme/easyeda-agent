@@ -1,4 +1,4 @@
-.PHONY: help test mcp-test fmt actions api-index build install dev-build daemon dev eext eext-fresh connector lint-test blocks-audit layout-calibrate release release-check release-build release-script-test skill-check publish-skill publish-skill-hub skillhub-check replay demo-replay replay-sch replay-pcb
+.PHONY: help test mcp-test fmt actions api-index build install dev-build daemon dev eext eext-fresh connector lint-test blocks-audit layout-calibrate release release-check release-build release-script-test release-smoke skill-check publish-skill publish-skill-hub skillhub-check replay demo-replay replay-sch replay-pcb
 
 DIST := dist
 
@@ -151,6 +151,9 @@ skill-check: ## validate tracked skill contents and installed-package local link
 
 release-script-test: ## offline tests for release guards, packaging and installed skill helpers
 	python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+release-smoke: ## smoke all release checksums/Skill and the native CLI offline (DIST=dist VERSION=vX.Y.Z)
+	python3 scripts/release-smoke.py --assets "$(DIST)" --version "$(VERSION)"
 
 release-check: ## check VERSION, changelog and package inputs without building or publishing
 	python3 scripts/release-check.py "$(VERSION)"

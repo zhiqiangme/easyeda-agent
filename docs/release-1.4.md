@@ -60,3 +60,40 @@ GitHub、ClawHub 和 SkillHub 使用同一份受控文件清单。
 层数证据缺失及预览一致性的回归。保留贡献提交与 PR 历史。
 四个旧本地分支及 `origin/feat/sch-zoned-layout-opt` 的提交均已在 main，清理其引用；
 含未提交文件的旧 1.3.1 临时工作区保留。新增 GitHub CI 执行 CLI、连接器和 Skill 检查。
+
+## 2026-09-07 安装与终端复验
+
+使用从 GitHub Release 重新下载的 v1.4.2 原包，八项资产 SHA-256 全部匹配。
+Skill 包含 56 个文件、79 个有效本地链接，连接器 manifest 为 1.4.2。
+
+| 验证 | 结果与边界 |
+|---|---|
+| macOS ARM64 | 原包在空工作目录执行 15 项 CLI 离线检查通过 |
+| macOS Intel 包 | 在 Apple Silicon 兼容层执行同样 15 项检查通过，未在 Intel 硬件运行 |
+| bash、zsh 新终端 | 隔离安装后 PATH 解析、版本和 compose 帮助通过；安装下载用原包本地回放 |
+| Linux amd64/arm64、Windows amd64 | 发布资产完整性通过，尚未在这些系统实际运行 |
+| Skill | 包内路径、版本、辅助脚本执行权限通过；未测 AI 客户端实际发现/加载界面 |
+| 原理图转换 | compose 正例、确定性、稳定 ID/位号/网络/NC 保留和错误输入拒绝通过；未调用 EDA |
+
+三个 subagent 分别完成安装链反证、跨平台 smoke 和独立代码审查。原版可复现：
+自定义客户端目录被忽略、升级失败返回成功、旧 Skill 文件残留、preserve 模式冒报新版本、
+daemon 启动将 Skill 升到与自身不同的 latest。源码已补充安装前校验、目录切换与失败回滚、
+版本绑定、精确版本匹配和非零失败；CLI 与不同客户端仍逐项更新，不是整体事务。
+这些修复尚未发布，下载原 v1.4.2 不会自动获得它们。
+
+可重复验证入口：
+
+```bash
+make release-smoke VERSION=v1.4.2 DIST=/absolute/path/to/downloaded-assets
+make release-script-test
+make test
+make lint-test
+make skill-check
+```
+
+本地通过 40 项发布/安装脚本测试、Go 全量测试、selfupdate race 检查和 lint 规则回归。
+另从已提交源码独立编译 `v1.4.2-install-validation` 候选 CLI，联网下载正式 Skill 包，
+在两个自定义客户端目录完成升级、删除旧文件和再次版本检查；错误客户端返回退出码 1。
+原生可执行文件的下载、精确版本核验和临时文件替换专项测试在 macOS 通过。
+新增 Ubuntu/macOS/Windows 原生 CLI smoke 及下载加载 CI；未推送执行的 CI 不计为通过。
+详细本地证据位于 Git 忽略目录 `tmp/install-validation-v1.4.2/`。
