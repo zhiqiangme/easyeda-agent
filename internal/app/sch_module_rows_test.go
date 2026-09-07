@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestSchModuleRowsZOrderAndUniformHeight(t *testing.T) {
+func TestSchModuleRowsZOrderAndContentHeight(t *testing.T) {
 	var frames []schFrameSpec
 	for i, v := range [][2]float64{{300, 100}, {330, 150}, {250, 120}, {350, 110}, {400, 180}} {
 		frames = append(frames, schFrameSpec{ID: string(rune('A' + i)), Rect: layoutBBox{MinX: 100, MinY: 100, MaxX: 100 + v[0], MaxY: 100 + v[1]}, TitleX: 110, TitleY: 90 + v[1]})
@@ -16,8 +16,8 @@ func TestSchModuleRowsZOrderAndUniformHeight(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, v := range p {
-		if v.Frame.ID != frames[i].ID || v.Frame.Rect.MaxY-v.Frame.Rect.MinY != 180 {
-			t.Fatal("logical order and uniform global row height must be preserved")
+		if v.Frame.ID != frames[i].ID || v.Frame.Rect.MaxY-v.Frame.Rect.MinY != frames[i].Rect.MaxY-frames[i].Rect.MinY {
+			t.Fatal("logical order and each content-derived frame height must be preserved")
 		}
 		if !boxInside(v.Frame.Rect, sheet) {
 			t.Fatal("frame outside sheet")
@@ -35,6 +35,9 @@ func TestSchModuleRowsZOrderAndUniformHeight(t *testing.T) {
 	}
 	if p[0].Row != 0 || p[2].Row != 0 || p[3].Row != 1 || p[4].Row != 1 {
 		t.Fatal("expected three modules then two in Z order")
+	}
+	if p[3].Frame.Rect.MaxY != 610 || p[3].Frame.Rect.MaxY != p[1].Frame.Rect.MinY-20 {
+		t.Fatal("second row must advance by the first row's 150 height, not the later row's 180 height")
 	}
 	if _, err := planSchModuleRows(frames, layoutBBox{MinX: 0, MinY: 0, MaxX: 500, MaxY: 400}, 20, 20); err == nil {
 		t.Fatal("overflow must not create additional pages")

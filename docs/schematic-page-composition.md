@@ -10,6 +10,7 @@
 schemaVersion: 1
 connectivity: 完整的 1.4 IR
 sheet: {minX, minY, maxX, maxY}
+sheetBorder?: {minX, minY, maxX, maxY}
 keepouts: [{minX, minY, maxX, maxY}, ...]
 modules: [
   {id, title, titleMetrics?, placements, wires, flags, terminals?}, ...
@@ -22,6 +23,7 @@ modules: [
 | `components[].device` | `libraryUuid/deviceUuid` 必须来自已解析的器件库身份。放置实例 ID 不能当库 UUID 重放。 |
 | `connectivity.modules` | 用 `coreComponents/peripheralComponents` 引用器件 ID；与几何模块成员逐项对应，每件只归属一个模块。 |
 | `sheet` | 目标页实际纸张 bbox；Apply 前再次核对。坐标单位为 0.01 inch，y 向上。 |
+| `sheetBorder` | 可选的实际图纸内边框 bbox，四个坐标须显式提供有限数值，不能缺省或为 null，且必须位于 `sheet` 内。模块虚线笔画与该边框至少保留 10 raw 净距；缺少整项时只沿纸张 bbox 排版，输出 `sheet-bbox-fallback`，不代表红框净距已经验证。 |
 | `keepouts` | 纸内禁止占用的区域，例如图签。记录其来源和可见状态；空数组表示确实没有禁放区域。 |
 | `modules` | 数组顺序就是功能阅读顺序，不按旧页面或旧 XY 排序。 |
 | `placements[]` | `designator/value/x/y/rotation/mirror/bbox/pins`。器件与引脚坐标落在 5 raw 网格；bbox 使用官方实测几何。`pins` 为完整的 `{number,name,net,x,y}` 数组，NC 引脚的 `net` 为空。旧 `primitiveId` 不作为新实例身份。 |
@@ -47,20 +49,34 @@ modules: [
 
 ## 排版与固定贴边尺寸
 
-页面边距、框内最小边距、模块间距、行间距、标题内缩及图签净距均为
+框内最小边距、模块间距、行间距、标题内缩及图签净距均为
 **10 raw = 0.1 inch = 2.54 mm**；标题与内容净距为 5 raw。
 这些尺寸由共享常量定义，当前 CLI 不提供逐模块调整参数。
 
+纸张外沿与图纸内边框分别记录为 `sheet`、`sheetBorder`。显式提供内边框时，
+规划先从它向内保留 10 raw 净距，再加模块虚线的 0.5 raw 半线宽，最后向内
+取整到 5 raw 网格；输出 `usableBounds` 是可容纳模块矩形路径的范围。
+每一完整模块框都必须落在此范围内。`placementBoundarySource` 为
+`explicit-sheet-border`；没有内框数据则为 `sheet-bbox-fallback`，沿用纸张 bbox
+内缩 10 raw 的兼容行为并提示边界未提供。`sheet` 始终保留原始纸张几何，
+不会用较小的内框替换 Apply 的纸张身份校验。
+
 先在模块上方、下方寻找标题空档，选择合法且总高度较小的包络；标题保持
 20 raw（0.2 inch），粉色 `#AA00AA`，外框同色、虚线、无填充。再从左上按 Z 字排列，
-右侧放不下才换行；所有行和同行框采用最大模块高度。平移同时作用于器件、引脚、
-导线、标记与标题，不改变器件朝向及任何电气连接。网格取整与统一行高可以增加留白。
+右侧放不下才换行。每个框保留由自身内容计算出的紧凑高度，同行仅顶边对齐；
+下一行按上一行最高框的高度加行间距推进。短模块不因相邻模块更高而扩框。
+输出 `rowHeights` 记录各行最高框的高度，`rowHeight` 仅记录其中最大值用于诊断。
+平移同时作用于器件、引脚、导线、标记与标题，不改变器件朝向及任何电气连接。
+网格取整可以增加少量留白，但不再使用全页最大高度扩展各模块。
 
 图签应通过 `sch sheet-geometry --json` 获取，并保留 `source/warnings`。
 运行时规则在 `internal/app/cmd_sch_sheet.go`，Skill 的 `sheet-templates.json` 是镜像。
 1170 × 825 的 A4 横向图纸、显示默认图签时，当前校准区域为
 `{minX:468,minY:0,maxX:1170,maxY:198}`。这是基于实测纸张和已校准模板的推导，
 不能把它称为独立图签图元的 API 实测 bbox，也不能把旧的 0.22 × 0.14 比例用于验收。
+该查询目前也不提供独立内边框 bbox。历史官方字段 `Border`、`Blade Width` 不能
+仅凭名称就转换成已验证的内框尺寸；取得可靠的边框几何后再写入 `sheetBorder`。
+离线测试使用的合成边框必须另存并标明来源，不能冒充当前工程的官方测量。
 
 ## CLI 闭环
 

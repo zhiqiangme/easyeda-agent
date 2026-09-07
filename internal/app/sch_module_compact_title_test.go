@@ -228,8 +228,8 @@ func TestCompactTitleRowsTranslateOccupancyWithoutChangingSource(t *testing.T) {
 	}
 	for i, row := range rows {
 		f := row.Frame
-		if f.Rect.MaxY-f.Rect.MinY != 185 {
-			t.Fatal("tight titles must still obey uniform row height")
+		if f.Rect.MaxY-f.Rect.MinY != frames[i].Rect.MaxY-frames[i].Rect.MinY {
+			t.Fatal("tight titles must retain their own compact frame height")
 		}
 		if err := checkSchFrameTitleOccupancy(f, f.titleBounds()); err != nil {
 			t.Fatalf("translated title no longer clears translated circuit: %v", err)

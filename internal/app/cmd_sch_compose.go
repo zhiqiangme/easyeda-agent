@@ -29,19 +29,24 @@ type schCompositionSource struct {
 	SchemaVersion int                    `json:"schemaVersion"`
 	Connectivity  connectivity.Document  `json:"connectivity"`
 	Sheet         layoutBBox             `json:"sheet"`
+	SheetBorder   *layoutBBox            `json:"sheetBorder,omitempty"`
 	Keepouts      []layoutBBox           `json:"keepouts"`
 	Modules       []schCompositionModule `json:"modules"`
 }
 type schCompositionPlan struct {
-	SchemaVersion int                   `json:"schemaVersion"`
-	Connectivity  connectivity.Document `json:"connectivity"`
-	Sheet         layoutBBox            `json:"sheet"`
-	Keepouts      []layoutBBox          `json:"keepouts"`
-	Layout        powerLayoutPlan       `json:"layout"`
-	Rows          int                   `json:"rows"`
-	RowHeight     float64               `json:"rowHeight"`
-	PageMargin    float64               `json:"pageMargin"`
-	ModuleGap     float64               `json:"moduleGap"`
+	SchemaVersion           int                   `json:"schemaVersion"`
+	Connectivity            connectivity.Document `json:"connectivity"`
+	Sheet                   layoutBBox            `json:"sheet"`
+	SheetBorder             *layoutBBox           `json:"sheetBorder,omitempty"`
+	PlacementBoundarySource string                `json:"placementBoundarySource"`
+	UsableBounds            layoutBBox            `json:"usableBounds"`
+	Keepouts                []layoutBBox          `json:"keepouts"`
+	Layout                  powerLayoutPlan       `json:"layout"`
+	Rows                    int                   `json:"rows"`
+	RowHeight               float64               `json:"rowHeight"`
+	RowHeights              []float64             `json:"rowHeights"`
+	PageMargin              float64               `json:"pageMargin"`
+	ModuleGap               float64               `json:"moduleGap"`
 }
 
 func newSchComposeCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -49,9 +54,16 @@ func newSchComposeCmd(stdout, stderr io.Writer) *cobra.Command {
 	var replace bool
 	c := &cobra.Command{Use: "compose", Short: "Compose authored Lib circuits onto one sheet and compile a guarded SCH Apply", Long: `Read schemaVersion:1 composition data containing connectivity (complete 1.4 IR),
 sheet, keepouts and ordered modules (id/title/placements/wires/flags/terminals).
+Optional sheetBorder is the explicit inner drawing-border bbox, separate from
+the full sheet bbox retained for Apply verification. Frames leave at least
+10 raw clearance inside that border, including their half-unit stroke; bounds
+are rounded inward to the 5-raw grid. Missing sheetBorder uses the legacy sheet
+bbox inset and reports sheet-bbox-fallback, not a measured inner border.
 Optional terminals reference measured pins and generate shortest clear straight
 leads, staggering marker lengths without changing nets or designators.
-Plan compact frames and titles, then Z rows with fixed 0.1-inch margins/gaps.
+Plan content-sized compact frames/titles, then top-aligned Z rows with fixed
+0.1-inch gaps. Each new row advances by the tallest frame in the preceding row;
+shorter module frames keep their own height.
 Preserve every pin-to-net and NC intent. No editor calls are made by this command.
 --playbook requires --before (fresh target components.list snapshot with hydrated
 device-library identity, pins, bbox and wire inventory). Rebuilding
@@ -74,6 +86,9 @@ No automatic pagination, symbol scaling or source-page deletion is performed.`, 
 		}
 		if err = dec.Decode(new(any)); err != io.EOF {
 			return fmt.Errorf("composition requires exactly one JSON document")
+		}
+		if err = validateSchCompositionBorderJSON(raw); err != nil {
+			return err
 		}
 		plan, err := planSchComposition(source)
 		if err != nil {
@@ -112,7 +127,10 @@ No automatic pagination, symbol scaling or source-page deletion is performed.`, 
 				return err
 			}
 		}
-		fmt.Fprintf(stderr, "compose: %d modules, %d parts, %d rows, row height %g; page margin/gap %g/%g raw\n", len(plan.Layout.Frames), len(plan.Layout.Placements), plan.Rows, plan.RowHeight, plan.PageMargin, plan.ModuleGap)
+		fmt.Fprintf(stderr, "compose: %d modules, %d parts, %d rows, maximum row height %g; page margin/gap %g/%g raw; boundary %s\n", len(plan.Layout.Frames), len(plan.Layout.Placements), plan.Rows, plan.RowHeight, plan.PageMargin, plan.ModuleGap, plan.PlacementBoundarySource)
+		if plan.SheetBorder == nil {
+			fmt.Fprintln(stderr, "compose: inner drawing border not supplied; clearance is relative to the sheet bbox only")
+		}
 		return nil
 	}}
 	c.Flags().StringVar(&from, "from", "", "authored module composition JSON")
@@ -136,6 +154,10 @@ func planSchComposition(src schCompositionSource) (*schCompositionPlan, error) {
 		return nil, fmt.Errorf("composition requires schemaVersion:1, modules, sheet and target projectId/documentId")
 	}
 	if err := d.Validate(); err != nil {
+		return nil, err
+	}
+	usable, boundarySource, err := schCompositionUsableBounds(src.Sheet, src.SheetBorder)
+	if err != nil {
 		return nil, err
 	}
 	for _, k := range src.Keepouts {
@@ -180,7 +202,7 @@ func planSchComposition(src schCompositionSource) (*schCompositionPlan, error) {
 			members[m.ID][id] = true
 		}
 	}
-	result := &schCompositionPlan{SchemaVersion: 1, Connectivity: d, Sheet: src.Sheet, Keepouts: src.Keepouts, PageMargin: schModulePageMargin, ModuleGap: schModuleGap, Layout: powerLayoutPlan{SchemaVersion: 1, DocumentID: d.DocumentID, ExpectedPinNets: pinNet}}
+	result := &schCompositionPlan{SchemaVersion: 1, Connectivity: d, Sheet: src.Sheet, SheetBorder: src.SheetBorder, PlacementBoundarySource: boundarySource, UsableBounds: usable, Keepouts: src.Keepouts, PageMargin: schModulePageMargin, ModuleGap: schModuleGap, Layout: powerLayoutPlan{SchemaVersion: 1, DocumentID: d.DocumentID, ExpectedPinNets: pinNet}}
 	seen := map[string]bool{}
 	seenModules := map[string]bool{}
 	layouts := []powerLayoutPlan{}
@@ -260,12 +282,15 @@ func planSchComposition(src schCompositionSource) (*schCompositionPlan, error) {
 	if len(seen) != len(d.Components) || len(seenModules) != len(d.Modules) {
 		return nil, fmt.Errorf("composition must cover every IR component and module exactly once")
 	}
-	rows, err := planSchModuleRows(result.Layout.Frames, src.Sheet, schModulePageMargin, schModuleGap)
+	rows, err := planSchModuleRows(result.Layout.Frames, usable, 0, schModuleGap)
 	if err != nil {
 		return nil, err
 	}
 	result.Layout.Frames = nil
 	for i, r := range rows {
+		if !boxInside(r.Frame.Rect, usable) {
+			return nil, fmt.Errorf("module %s exceeds the usable drawing border", r.Frame.ID)
+		}
 		for _, k := range src.Keepouts {
 			if boxesGapOverlap(r.Frame.Rect, k, schModulePageMargin) {
 				return nil, fmt.Errorf("module %s overlaps the title-block keepout; revise module geometry/order", r.Frame.ID)
@@ -278,7 +303,12 @@ func planSchComposition(src schCompositionSource) (*schCompositionPlan, error) {
 		result.Layout.Flags = append(result.Layout.Flags, p.Flags...)
 		result.Layout.Frames = append(result.Layout.Frames, r.Frame)
 		result.Rows = r.Row + 1
-		result.RowHeight = r.Frame.Rect.MaxY - r.Frame.Rect.MinY
+		height := r.Frame.Rect.MaxY - r.Frame.Rect.MinY
+		for len(result.RowHeights) <= r.Row {
+			result.RowHeights = append(result.RowHeights, 0)
+		}
+		result.RowHeights[r.Row] = math.Max(result.RowHeights[r.Row], height)
+		result.RowHeight = math.Max(result.RowHeight, height)
 	}
 	if err = validatePowerLayout(&result.Layout, src.Sheet); err != nil {
 		return nil, err

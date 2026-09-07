@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -50,7 +51,7 @@ func composeFixture(moduleCount int) schCompositionSource {
 	return src
 }
 
-func TestComposeFixedMarginsAndEqualHeightZRows(t *testing.T) {
+func TestComposeFixedMarginsAndContentHeightZRows(t *testing.T) {
 	src := composeFixture(4)
 	plan, err := planSchComposition(src)
 	if err != nil {
@@ -67,20 +68,23 @@ func TestComposeFixedMarginsAndEqualHeightZRows(t *testing.T) {
 		t.Fatal("Z rows must start at the fixed top-left inset, then return to the left edge")
 	}
 	for i, frame := range f {
-		if frame.ID != src.Modules[i].ID || frame.Rect.MaxY-frame.Rect.MinY != plan.RowHeight {
-			t.Fatalf("module order or uniform row height changed: %+v", frame)
+		if frame.ID != src.Modules[i].ID || frame.Rect.MaxY-frame.Rect.MinY > plan.RowHeights[i/2] {
+			t.Fatalf("module order or row maximum diagnostic changed: %+v", frame)
 		}
 		if !boxInside(frame.Rect, layoutBBox{MinX: src.Sheet.MinX + 10, MinY: src.Sheet.MinY + 10, MaxX: src.Sheet.MaxX - 10, MaxY: src.Sheet.MaxY - 10}) {
 			t.Fatal("frame crosses the fixed paper inset")
 		}
 	}
 	for _, first := range []int{0, 2} {
-		if f[first+1].Rect.MinX-f[first].Rect.MaxX != 10 || f[first].Rect.MaxY != f[first+1].Rect.MaxY || f[first].Rect.MinY != f[first+1].Rect.MinY {
-			t.Fatal("neighbours must share top/bottom edges and the fixed horizontal gap")
+		if f[first+1].Rect.MinX-f[first].Rect.MaxX != 10 || f[first].Rect.MaxY != f[first+1].Rect.MaxY {
+			t.Fatal("neighbours must share top edges and the fixed horizontal gap")
 		}
 	}
-	if f[0].Rect.MinY-f[2].Rect.MaxY != 10 {
-		t.Fatal("row-to-row gap must use the same fixed spacing")
+	if math.Min(f[0].Rect.MinY, f[1].Rect.MinY)-f[2].Rect.MaxY != 10 {
+		t.Fatal("row-to-row gap must follow the tallest frame in the previous row")
+	}
+	if f[0].Rect.MinY == f[1].Rect.MinY || f[0].Rect.MaxY-f[0].Rect.MinY == plan.RowHeight {
+		t.Fatal("the short first module must not inherit another module's height")
 	}
 }
 

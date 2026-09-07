@@ -3,8 +3,10 @@ package app
 import "fmt"
 
 // Modules are consumed in logical order, never sorted by their previous XY.
-// All rows have the same height (the largest module), and every frame in a row
-// shares its top and bottom. Internal circuit geometry is translated as a unit.
+// Frames in a row share their top edge, retaining their content-derived height.
+// The next row advances by this row's tallest frame. Internal circuit geometry
+// is translated as a unit; a small module never inherits another module's blank
+// vertical space.
 type schModuleRowPlacement struct {
 	Frame  schFrameSpec
 	Row    int
@@ -15,30 +17,29 @@ func planSchModuleRows(frames []schFrameSpec, sheet layoutBBox, margin, gap floa
 	if len(frames) == 0 || !plBoxValid(sheet) || !plGrid(margin) || !plGrid(gap) || margin < 0 || gap < 0 {
 		return nil, fmt.Errorf("Z layout requires frames, a finite sheet and nonnegative grid spacing")
 	}
-	height := 0.0
 	seen := map[string]bool{}
 	for _, f := range frames {
 		if !plBoxValid(f.Rect) || f.ID == "" || seen[f.ID] {
 			return nil, fmt.Errorf("invalid/duplicate module frame %q", f.ID)
 		}
 		seen[f.ID] = true
-		if h := plCeil(f.Rect.MaxY - f.Rect.MinY); h > height {
-			height = h
-		}
 	}
 	x, top := sheet.MinX+margin, sheet.MaxY-margin
 	right, bottom := sheet.MaxX-margin, sheet.MinY+margin
 	row := 0
+	rowHeight := 0.0
 	out := make([]schModuleRowPlacement, 0, len(frames))
 	for _, f := range frames {
 		width := plCeil(f.Rect.MaxX - f.Rect.MinX)
+		height := f.Rect.MaxY - f.Rect.MinY
 		if width > right-(sheet.MinX+margin) {
 			return nil, fmt.Errorf("module %s is wider than the usable sheet", f.ID)
 		}
 		if x+width > right {
 			x = sheet.MinX + margin
-			top -= height + gap
+			top -= plCeil(rowHeight) + gap
 			row++
+			rowHeight = 0
 		}
 		if top-height < bottom {
 			return nil, fmt.Errorf("module %s would exceed the single sheet in row %d; reduce input extents (no automatic pagination)", f.ID, row+1)
@@ -47,6 +48,9 @@ func planSchModuleRows(frames []schFrameSpec, sheet layoutBBox, margin, gap floa
 		f = translateSchFrame(f, dx, dy)
 		f.Rect = layoutBBox{MinX: x, MinY: top - height, MaxX: x + width, MaxY: top}
 		out = append(out, schModuleRowPlacement{Frame: f, Row: row, DX: dx, DY: dy})
+		if height > rowHeight {
+			rowHeight = height
+		}
 		x += width + gap
 	}
 	return out, nil
