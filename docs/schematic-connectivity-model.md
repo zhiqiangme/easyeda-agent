@@ -5,7 +5,7 @@
 ## Connectivity IR
 
 - `component`：稳定实例 `id`、显示位号 `ref`、可选功能 `role`、`libraryUuid`、`deviceUuid`、封装和属性；
-- `pin`：所属器件、pin number、名称、方向和电气类型；
+- `pin`：所属器件、pin number、名称、方向和电气类型；明确 NC 为 `noConnected:true`，已知悬空为 `connectionState:"unconnected"`；
 - `net`：项目内稳定 `netId`、规范名称、作用域和角色；1.4 快照会把电源/地识别为
   `scope=global`（`role=power|ground`），普通信号识别为 `scope=local`、
   `role=signal`。这是规划提示，不改变 `pin_net` 的权威性；未知命名仍保守归入
@@ -15,6 +15,10 @@
 - `module`：可复用 Lib 的核心器件、外围器件、内部网和对外端口。
 
 `primitiveId` 和几何数据属于布局层，不得成为连接依据。保存、导入 PCB、DRC 和回归测试均以 `pin_net` 对账。
+
+无损重建可保留已知悬空脚：只有原生快照明确给出空字符串网络与 `noConnected:false`
+才自动记录该状态；它与连接和 NC 互斥。悬空警告仍保留，缺失证据仍拒绝，
+数据快照完整不等于电气设计完成。详见[已知悬空与未知引脚](concepts.md#已知悬空与未知引脚)。
 
 `id`、`ref`、`role` 的含义见[共享词汇表](concepts.md#器件身份位号与功能角色)。
 实例通过 `otherProperty["EasyEDA Agent Component ID"]` 保存 canonical ID，通过

@@ -31,6 +31,27 @@ func buildSchPlan(a, b connectivity.Document) (*playbook, error) {
 	for _, c := range b.Components {
 		bc[c.ID] = c
 	}
+	// An explicit open pin becomes connected when its new marker edge is
+	// added. Normalize only that declaration for comparison; all identity,
+	// pin inventory, geometry and NC changes remain unsupported.
+	oldEdges := map[[2]string]bool{}
+	newEdges := map[[2]string]bool{}
+	for _, edge := range a.Connections {
+		oldEdges[[2]string{edge.ComponentID, edge.PinNumber}] = true
+	}
+	for _, edge := range b.Connections {
+		newEdges[[2]string{edge.ComponentID, edge.PinNumber}] = true
+	}
+	for id, c := range ac {
+		c.Pins = append([]connectivity.Pin(nil), c.Pins...)
+		for i, pin := range c.Pins {
+			key := [2]string{id, pin.Number}
+			if pin.ConnectionState == "unconnected" && !oldEdges[key] && newEdges[key] {
+				c.Pins[i].ConnectionState = ""
+			}
+		}
+		ac[id] = c
+	}
 	if !reflect.DeepEqual(ac, bc) || !reflect.DeepEqual(a.Modules, b.Modules) {
 		return nil, fmt.Errorf("component/module changes unsupported; no plan generated")
 	}
@@ -95,6 +116,20 @@ func buildSchPlan(a, b connectivity.Document) (*playbook, error) {
 	for _, c := range additions {
 		p.Steps = append(p.Steps, playbookStep{ID: fmt.Sprintf("connect-%03d", len(p.Steps)+1), Run: "sch autoconnect", Flags: map[string]any{"pin": bc[c.ComponentID].Ref + ":" + c.PinNumber, "net": bn[c.NetID].Name, "kind": c.Kind, "strict": true}})
 		state.Connections = append(append([]connectivity.Connection(nil), state.Connections...), c)
+		// Copy before updating so already emitted checkpoints and caller input
+		// retain their original open-pin declarations.
+		state.Components = append([]connectivity.Component(nil), state.Components...)
+		for i, part := range state.Components {
+			if part.ID != c.ComponentID {
+				continue
+			}
+			state.Components[i].Pins = append([]connectivity.Pin(nil), part.Pins...)
+			for j, pin := range part.Pins {
+				if pin.Number == c.PinNumber && pin.ConnectionState == "unconnected" {
+					state.Components[i].Pins[j].ConnectionState = ""
+				}
+			}
+		}
 		check()
 	}
 	if len(additions) > 0 {

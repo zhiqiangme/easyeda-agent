@@ -9,7 +9,7 @@ CLI 参数以 `easyeda sch <command> --help` 为准；电路选型依据具体�
 | 对象 | 权威数据与约束 |
 |---|---|
 | `component` | `id` 为稳定、不透明实例 ID；`ref` 为显示位号；可选 `role` 保存功能名。`device.libraryUuid/deviceUuid` 是器件库身份，不能用 16 位放置实例 UUID 替代 32 位库 UUID。 |
-| `pin` | `number` 是完整物理引脚编号，`name` 是符号脚名；明确 NC 用 `noConnected:true`。保留器件所有物理引脚。 |
+| `pin` | `number` 是完整物理引脚编号，`name` 是符号脚名；明确 NC 用 `noConnected:true`；已确认悬空用 `connectionState:"unconnected"`。保留器件所有物理引脚。 |
 | `net` | 稳定 `id`、名称 `name`、可选 `scope/role`。电源与地通常为 `global/power|ground`，信号通常为 `local/signal`；作用域是规划提示，不替代连接记录。 |
 | `connections` | 每条为 `{componentId,pinNumber,netId,kind}`；导出使用 `kind:"netlist"`，它不表示导线几何。通过稳定 ID 引用对象。 |
 | `modules` | Lib 的 `id/name/coreComponents/peripheralComponents/internalNets/ports`。核心和外围列表引用组件 ID，不引用 primitiveId 或从 ID 截取位号。 |
@@ -17,7 +17,10 @@ CLI 参数以 `easyeda sch <command> --help` 为准；电路选型依据具体�
 
 Connectivity JSON 顶层为 `schemaVersion:"1.4"`、`projectId/documentId`、
 `components/nets/connections`，可附 `modules/issues`。一个参与绘图的引脚应恰好对应
-一个网络或明确 NC；未知、缺失证据需要修复，不能自动填 NC。多个同功能脚也要逐脚连接。
+一个网络、明确 NC 或显式 `connectionState:"unconnected"`，三者互斥。
+悬空状态仅在官方快照明确返回 `net:""` 与 `noConnected:false` 时自动导出，
+用于原样重建未完成的图，仍保留 `unconnected-pin` 警告，不代表设计通过。
+未知、缺失证据需要修复，不能自动填 NC 或悬空。多个同功能脚也要逐脚连接。
 
 实例通过 `otherProperty["EasyEDA Agent Component ID"]` 保留 canonical ID，
 `otherProperty["EasyEDA Agent Role"]` 保留可选功能角色。重新导出优先读取绑定；
@@ -49,7 +52,7 @@ FOOTPRINT `DOCHEAD` 和唯一 `META.source` 证明实例封装到库资产的出
 | 非标准位号修复 | `sch designators allocate` 分配，`plan` 编译原地修改队列，`verify` 执行前后校验。 |
 | 完整 Lib 图面 | `sch compose`：完整连接核心与局部几何 → 单页布局与受保护 Apply。 |
 | 基础放置 | `sch materialize`：已知库身份和 placement → 放件队列，可选逐脚标记。它不是完整模块绘图器。 |
-| 明确的标记增量 | `sch plan before.json after.json`：仅新增指定 kind 的电源/地/网络端口连接；不支持任意器件更改、删网或重接。 |
+| 明确的标记增量 | `sch plan before.json after.json`：仅新增指定 kind 的电源/地/网络端口连接；对应脚原为 `unconnected` 时，目标移除此声明并新增连接。其他器件/引脚/NC 变更、删网或重接均拒绝；逐步回读仍核对明确悬空及 NC。 |
 | 只画框和标题 | `sch frame apply/check --from frames.json`；字段见 `sch frame --help` 与 [actions.md](actions.md)。 |
 | 执行队列 | `sch apply plan.json`，顺序等待 WebSocket 响应并记录 journal。 |
 

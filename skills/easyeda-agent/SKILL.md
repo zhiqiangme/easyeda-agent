@@ -71,6 +71,9 @@ metadata:
 - 使用真实非零导线连接 netflag 与 pin，坐标重合不算连接。原理图坐标 **y 向上**，网格 5 raw。
   符号方向以 [orientation.json](references/orientation.json) 和实际回读为准。
 - 保留明确 NC，不删除器件物理引脚，也不将缺失连接自动改为 NC。
+  原样重建未完成图时，官方快照明确返回 `net:""` 和 `noConnected:false` 的脚可用
+  `connectionState:"unconnected"` 保留；字段缺失或未声明状态仍属未知。悬空仍保留电气警告，
+  数据完整与绘图成功不代表电气设计合格，严格门禁仍须执行。
   网表使用 `sch read/check/netlist`；不调用已废弃、可能挂起的 `sch_Netlist.getNetlist()`。
 - 写入超时或部分成功后先回读，不盲重试。受保护队列不能用 `--resume/--from/--to` 跳过守卫；
   从实际状态重新生成。Apply 不提供事务撤销；autosave 仅兜底，检查点须显式 `sch save` / `pcb save`。

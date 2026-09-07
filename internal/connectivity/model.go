@@ -34,6 +34,7 @@ type Diff struct {
 	RemovedNets        []string `json:"removedNets,omitempty"`
 	ChangedConnections []string `json:"changedConnections,omitempty"`
 	ChangedNoConnect   []string `json:"changedNoConnect,omitempty"`
+	ChangedPinState    []string `json:"changedPinState,omitempty"`
 }
 
 func Compare(a, b Document) Diff {
@@ -102,6 +103,15 @@ func Compare(a, b Document) Diff {
 				d.ChangedNoConnect = append(d.ChangedNoConnect, id+":"+n)
 			}
 		}
+		states := map[string]string{}
+		for _, p := range ca.Pins {
+			states[p.Number] = p.ConnectionState
+		}
+		for _, p := range cb.Pins {
+			if states[p.Number] != p.ConnectionState {
+				d.ChangedPinState = append(d.ChangedPinState, id+":"+p.Number)
+			}
+		}
 	}
 	for k := range am {
 		if _, ok := bm[k]; !ok {
@@ -114,6 +124,7 @@ func Compare(a, b Document) Diff {
 	sort.Strings(d.RemovedNets)
 	sort.Strings(d.ChangedConnections)
 	sort.Strings(d.ChangedNoConnect)
+	sort.Strings(d.ChangedPinState)
 	return d
 }
 
@@ -149,12 +160,13 @@ type Device struct {
 	Name        string `json:"name,omitempty"`
 }
 type Pin struct {
-	Number      string  `json:"number"`
-	Name        string  `json:"name,omitempty"`
-	Type        string  `json:"type,omitempty"`
-	NoConnected bool    `json:"noConnected,omitempty"`
-	X           float64 `json:"x,omitempty"`
-	Y           float64 `json:"y,omitempty"`
+	Number          string  `json:"number"`
+	Name            string  `json:"name,omitempty"`
+	Type            string  `json:"type,omitempty"`
+	NoConnected     bool    `json:"noConnected,omitempty"`
+	ConnectionState string  `json:"connectionState,omitempty"`
+	X               float64 `json:"x,omitempty"`
+	Y               float64 `json:"y,omitempty"`
 }
 type Net struct {
 	ID    string `json:"id"`
@@ -201,6 +213,12 @@ func (d *Document) Validate() error {
 		refs[c.Ref] = true
 		for _, p := range c.Pins {
 			k := [2]string{c.ID, p.Number}
+			if p.ConnectionState != "" && p.ConnectionState != "unconnected" {
+				return fmt.Errorf("%s.%s has unsupported connectionState %q", c.Ref, p.Number, p.ConnectionState)
+			}
+			if p.ConnectionState == "unconnected" && (p.NoConnected || connectedPin(d, c.ID, p.Number)) {
+				return fmt.Errorf("%s.%s unconnected state conflicts with a net or NC", c.Ref, p.Number)
+			}
 			if p.Number == "" || pins[k] {
 				return fmt.Errorf("empty/duplicate pin on %s", c.Ref)
 			}
@@ -228,6 +246,15 @@ func (d *Document) Validate() error {
 			return fmt.Errorf("connection references unknown net %s", c.NetID)
 		}
 	}
+	// Refresh this derived diagnosis instead of accumulating a stale warning on
+	// every validate/export cycle or retaining it after the pin is connected.
+	issues := d.Issues[:0]
+	for _, issue := range d.Issues {
+		if issue.Code != "unconnected-pin" {
+			issues = append(issues, issue)
+		}
+	}
+	d.Issues = issues
 	for _, c := range d.Components {
 		for _, p := range c.Pins {
 			if !connectedPin(d, c.ID, p.Number) && !p.NoConnected {

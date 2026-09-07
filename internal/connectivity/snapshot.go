@@ -92,8 +92,11 @@ func FromRead(m map[string]any) (Document, error) {
 			if _, ok := p["net"]; !ok {
 				return d, fmt.Errorf("%s.%s: missing net evidence", ref, n)
 			}
-			nc, _ := p["noConnected"].(bool)
+			nc, ncKnown := p["noConnected"].(bool)
 			pin := Pin{Number: n, Name: name, NoConnected: nc}
+			if net, known := p["net"].(string); known && net == "" && ncKnown && !nc {
+				pin.ConnectionState = "unconnected"
+			}
 			pin.X, _ = numberValue(p["x"])
 			pin.Y, _ = numberValue(p["y"])
 			c.Pins = append(c.Pins, pin)

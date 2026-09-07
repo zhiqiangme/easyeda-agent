@@ -22,6 +22,23 @@ func compareObserved(expected connectivity.Document, result map[string]any) erro
 	if !reflect.DeepEqual(a, b) {
 		return fmt.Errorf("connectivity mismatch: live pin-to-net differs from expected snapshot; stop and re-plan")
 	}
+	observedPins := map[[2]string]connectivity.Pin{}
+	for _, c := range live.Components {
+		for _, p := range c.Pins {
+			observedPins[[2]string{c.Ref, p.Number}] = p
+		}
+	}
+	for _, c := range expected.Components {
+		for _, p := range c.Pins {
+			got := observedPins[[2]string{c.Ref, p.Number}]
+			if got.NoConnected != p.NoConnected {
+				return fmt.Errorf("connectivity mismatch: %s.%s NC differs from expected snapshot; stop and re-plan", c.Ref, p.Number)
+			}
+			if p.ConnectionState == "unconnected" && got.ConnectionState != "unconnected" {
+				return fmt.Errorf("connectivity mismatch: %s.%s lacks explicit empty-net/noConnected:false evidence; stop and re-plan", c.Ref, p.Number)
+			}
+		}
+	}
 	return nil
 }
 func (r *applyRunner) checkConnectivity(d *connectivity.Document) (any, error) {

@@ -69,8 +69,18 @@ func planLibLayout(input libLayoutSource) (*schCompositionSource, error) {
 	}
 	for _, c := range d.Components {
 		for _, q := range c.Pins {
-			if (pinNet[c.ID][q.Number] == "") != q.NoConnected {
-				return fail("%s.%s must have exactly one net or explicit NC", c.Ref, q.Number)
+			states := 0
+			if pinNet[c.ID][q.Number] != "" {
+				states++
+			}
+			if q.NoConnected {
+				states++
+			}
+			if q.ConnectionState == "unconnected" {
+				states++
+			}
+			if states != 1 {
+				return fail("%s.%s must have exactly one net or explicit NC or unconnected intent", c.Ref, q.Number)
 			}
 		}
 	}
@@ -119,7 +129,7 @@ func planLibLayout(input libLayoutSource) (*schCompositionSource, error) {
 	if len(owners) != len(d.Components) {
 		return fail("every component must belong to one module")
 	}
-	result := &schCompositionSource{SchemaVersion: 1, Connectivity: src.Connectivity, Sheet: src.Sheet, SheetBorder: src.SheetBorder, Keepouts: src.Keepouts}
+	result := &schCompositionSource{SchemaVersion: 1, Connectivity: d, Sheet: src.Sheet, SheetBorder: src.SheetBorder, Keepouts: src.Keepouts}
 	seenModules := map[string]bool{}
 	for _, intent := range src.LayoutModules {
 		cm, ok := modules[intent.ID]

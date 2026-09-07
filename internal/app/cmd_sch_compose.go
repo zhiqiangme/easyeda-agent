@@ -64,7 +64,9 @@ leads, staggering marker lengths without changing nets or designators.
 Plan content-sized compact frames/titles, then top-aligned Z rows with fixed
 0.1-inch gaps. Each new row advances by the tallest frame in the preceding row;
 shorter module frames keep their own height.
-Preserve every pin-to-net and NC intent. No editor calls are made by this command.
+Preserve every pin-to-net, NC and explicit connectionState:"unconnected". Known
+open pins retain electrical warnings; missing evidence is still refused.
+No editor calls are made by this command.
 --playbook requires --before (fresh target components.list snapshot with hydrated
 device-library identity, pins, bbox and wire inventory). Rebuilding
 a differing target requires --replace; an already matching target produces only
@@ -239,8 +241,18 @@ func planSchComposition(src schCompositionSource) (*schCompositionPlan, error) {
 					return nil, fmt.Errorf("%s.%s pin geometry/net differs from IR", c.Designator, q.Number)
 				}
 				seenPins[q.Number] = true
-				if (net == "") == !cp.NoConnected {
-					return nil, fmt.Errorf("%s.%s must have exactly one net or explicit NC intent", c.Designator, q.Number)
+				states := 0
+				if net != "" {
+					states++
+				}
+				if cp.NoConnected {
+					states++
+				}
+				if cp.ConnectionState == "unconnected" {
+					states++
+				}
+				if states != 1 {
+					return nil, fmt.Errorf("%s.%s must have exactly one net or explicit NC or unconnected intent", c.Designator, q.Number)
 				}
 			}
 			// The target will create fresh primitives; source instance IDs are not

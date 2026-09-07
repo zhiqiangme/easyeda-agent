@@ -373,6 +373,7 @@ func canonicalDesignState(input Document) (map[string]any, error) {
 	pins, components, nets := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	ambiguousPinRefs := map[string]bool{}
 	nc := map[[2]string]bool{}
+	unconnected := map[[2]string]bool{}
 	connected := map[[2]string]string{}
 	for _, c := range d.Components {
 		if strings.TrimSpace(c.ID) == "" || strings.TrimSpace(c.Ref) == "" {
@@ -412,6 +413,7 @@ func canonicalDesignState(input Document) (map[string]any, error) {
 			}
 			pins[c.ID+"."+p.Number] = true
 			nc[[2]string{c.ID, p.Number}] = p.NoConnected
+			unconnected[[2]string{c.ID, p.Number}] = p.ConnectionState == "unconnected"
 		}
 	}
 	for _, n := range d.Nets {
@@ -436,7 +438,7 @@ func canonicalDesignState(input Document) (map[string]any, error) {
 		connected[k] = c.NetID
 	}
 	for key, isNC := range nc {
-		if connected[key] == "" && !isNC {
+		if connected[key] == "" && !isNC && !unconnected[key] {
 			return nil, &IncompleteDesignError{Reason: key[0] + "." + key[1] + " has neither a net nor explicit NC"}
 		}
 	}
