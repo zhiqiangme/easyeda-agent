@@ -5,6 +5,9 @@
 
 ## 安装与升级
 
+CLI/daemon、`easyeda-agent` Skill 和 EDA Agent Connector 是三个必须同版的组成部分；
+EasyEDA Pro 是宿主，不参与项目版本号对齐。
+
 发布版安装 CLI 和 Skill：
 
 ```bash
@@ -21,19 +24,19 @@ Skill 时用 `--create-missing`，保留本地 Skill 修改用 `--preserve`，�
 在另一台机器或新的终端验证时，固定 Release 版本并使用独立目录，先检查
 `easyeda --version`、`easyeda sch compose --help`、`easyeda blocks ls --json`。
 这些命令无需 daemon；命令存在且离线规划成功后，再检查连接器与真实页面。
-`v1.4.2-dirty` 是开发构建，不能作为正式 `v1.4.2` 安装验证的证据。
+带 `-dirty` 或 git describe 后缀的版本是开发构建，不能作为正式 Release 安装验证的证据。
 
 安装链的后续修复支持 `EASYEDA_INSTALL_DIR` 指定二进制目录，并遵循客户端的
 `CODEX_HOME` / `CLAUDE_CONFIG_DIR`；未设置时仍用默认目录。需确认 `command -v easyeda`
 指向刚安装的文件，必要时刷新 shell 命令缓存。Windows 下载
 `easyeda_windows_amd64.exe` 并命名为 `easyeda.exe`，把所在目录加入 PATH，再运行
-`easyeda update --skill-only --create-missing --version 1.4.2` 安装 Skill。
+`easyeda update --skill-only --create-missing --version <version>` 安装 Skill。
 Git Bash/WSL 与原生 Windows 是不同运行环境，选择相应的二进制。
 
 安装/升级失败须保留非零退出码，不能只依据最后一行提示判定成功。普通 Skill 更新
 应替换完整发布目录，清理已删除的旧参考；`--preserve` 是混合本地内容，保留旧版本标记，
 不能宣称全部文件已升级。daemon 启动时只同步自身版本的 Skill，版本升级由显式
-`easyeda update` 完成。这些修复须经新版本发布才会进入已安装的 1.4.2。
+`easyeda update` 完成。
 
 仓库开发使用 `make build` 构建 CLI，`make install` 安装，`make dev` 保持 daemon
 随 Go 代码热重建。`make dev` 会刷新仓库二进制和可写的安装路径；先用 `command -v easyeda`

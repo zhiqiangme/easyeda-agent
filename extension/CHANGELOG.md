@@ -2,14 +2,26 @@
 
 ## [Unreleased]
 
+## [1.4.3] — 2026-09-08
+
+### Added
+
+- Calculate reusable schematic Lib circuits from canonical nets and measured pin geometry, then compose compact Z-order pages with independently sized frames, minimum inner clearance, pink dashed borders, and 0.2-inch titles.
+- Add full schematic design comparison and guarded incremental frame/title Apply. Preserve explicit unconnected pins and compile reviewed NC-to-connected additions without changing valid original designators.
+- Document the three-part same-version contract for CLI/daemon, Skill, and Connector, with copyable AI-agent prompts that require local canonical data, diff/Apply, readback, gates, save, and visual export review.
+
 ### Fixed
 
-- Validate CLI and Skill downloads before installation, honor explicit binary/client directories, and preserve shared Skill symlinks. Normal updates remove retired Skill files; preserve mode retains the previous version marker.
+- Resolve placed component identity from native library provenance and reconcile readback evidence without false design differences. Single-page snapshots may infer an omitted page ID; conflicting or unknown cross-page evidence remains rejected.
+- Normalize numeric comparison and hashing without hiding real geometry changes. Treat drawing fields absent from readback as incomplete/unverified instead of claiming exact synchronization.
+- Validate CLI and Skill downloads before installation, honor explicit binary/client directories, preserve shared Skill symlinks, and remove retired Skill files during normal updates. Preserve mode retains the previous version marker.
 - Return failure when an update fails, validate exact binary/Skill versions and checksum entries, and keep daemon startup Skill sync aligned with the running release. Reject unknown clients and relative client directories.
 
-### Validation
+### Validation and limits
 
-- Add reusable release-asset and isolated CLI smoke checks, Bash installer failure regression tests, and native Ubuntu/macOS/Windows CI checks including real download, execution and replacement of a temporary binary. Only macOS execution has been verified locally; this does not constitute an EDA acceptance run.
+- Add reusable release-asset and isolated CLI smoke checks, Bash installer failure regression tests, and native Ubuntu/macOS/Windows CI checks including real download, execution and replacement of a temporary binary. Only macOS execution has been verified locally; this does not constitute a complete EDA acceptance run.
+- Hongen live Apply/readback preserved 23 components and 165 physical pins while adding 12 reviewed connections and clearing four incorrect NC states. Local layout/check/bridge gates report zero errors and warnings; official DRC remains at 3 WARN, so strict acceptance is not claimed.
+- HostLink, PTT, RF LED and the conflicting TALK GPIO4 responsibility remain unresolved. The full `esp32MiniRequire.md` requirement-to-four-layer-PCB regression was not rerun for this maintenance release.
 
 ## [1.4.2] — 2026-09-06
 

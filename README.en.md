@@ -16,7 +16,7 @@
 
 ![easyeda-agent workflow](docs/assets/easyeda-agent-workflow.svg)
 
-> **Version 1.4.2.** Schematic work starts from component,
+> **Version 1.4.3.** Schematic work starts from component,
 > pin, and connectivity data: design each Lib circuit and its geometry locally,
 > compose one sheet with `sch compose`, then execute and verify with `sch apply`.
 > See [1.4 release and validation](docs/release-1.4.md) for release status and validation limits.
@@ -63,7 +63,7 @@ On top of those three, easyeda-agent adds the engineering middle layer: a self-h
 | Domain | What it does |
 |---|---|
 | **Circuit-block library (flagship)** | Community-built, credited library of **proven peripheral subcircuits** (CH340 USB-serial, ESP32 auto-download, button de-bounce, USB-hub, buck…). **Copy the topology, only rebind boundary nets** to reuse |
-| Schematic | Canonical connectivity → Lib geometry → `sch compose` on one sheet in equal-height Z-order rows → `sch apply`; normal designators stay separate from functional Role; pink dashed frames and 0.2 inch titles fit into available space above or below the circuit |
+| Schematic | Canonical connectivity → Lib geometry → compact Z-order `sch compose` on one sheet → `sch apply`; normal designators stay separate from functional Role; each pink dashed frame fits its contents with a minimum inset and a 0.2 inch title |
 | Validation | Local data checks, Apply readback of pins/nets/NC/geometry, and the four-stage `sch gate --strict`: layout-lint → check → bridge-check → drc |
 | PCB | Auto-layout, board outline, keep-outs, rule-aware short-route, 4-layer power planes, copper pour, silkscreen avoidance, DRC/`pcb check` |
 | Design flow | Gated spine from a **customer-voice requirement** to a finished board (S0–S6 + P0–P10), milestone confirmation, save checkpoints |
@@ -87,10 +87,10 @@ parts point back into the standard-parts library (BOM-ready).
 > without a daemon or editor window. Contribution guide:
 > [`standard-blocks-contributing.md`](skills/easyeda-agent/references/standard-blocks-contributing.md)
 
-## Install Skills
+## Install
 
 > **Full setup & usage notes: [Quick Start →](docs/quick-start.md)** — the
-> four-part suite (CLI / connector `.eext` / Skill / EasyEDA), version alignment,
+> three required parts (CLI / connector `.eext` / Skill), version alignment,
 > starting the daemon, upgrade discipline, and a troubleshooting table. **On
 > upgrade, bump all three (CLI + connector + Skill) to the same version**, or
 > `easyeda daemon health` flags the lagging connector as stale.
@@ -154,6 +154,33 @@ clawhub install easyeda-agent
 
 The old split skills (`easyeda-schematic`, `easyeda-pcb`, `easyeda-design-flow`,
 `easyeda-conventions`) have been merged and removed from the repository.
+
+### Recommended prompt for an AI agent
+
+Give the following prompt to the agent together with the actual design request:
+
+```text
+Use easyeda-agent to complete this EasyEDA Pro task.
+
+Before editing, confirm that these three parts use the same release version:
+1. easyeda CLI/daemon
+2. easyeda-agent Skill
+3. EDA Agent Connector extension
+
+Run easyeda update --check --exit-code. If the CLI or Skill is behind, run easyeda
+update. If the connector is behind, install easyeda-agent-connector.eext from the
+same GitHub Release, save open documents, then fully quit and restart EasyEDA.
+Enable Allow external interaction and run easyeda health to verify the target
+project, page, and versions.
+
+For schematic work, first read or create a local canonical connectivity JSON. Treat
+components, complete physical pins, stable net IDs, and pin-to-net/NC records as the
+source of truth. Compute component XY positions, orientations, wires, and functional
+Libs locally, then generate the diff/Apply queue. After Apply, read every pin back,
+run layout-lint, check, bridge-check, and DRC, save explicitly, and inspect an export.
+Do not guess connectivity from screenshots, change existing designators, confuse GPIO
+numbers with physical pin numbers, or report unverified/WARN results as passing.
+```
 
 ### Optional: MCP integration
 
@@ -246,11 +273,11 @@ Both sides of the action protocol are in place and working. The Go daemon owns t
 
 ## Capabilities
 
-Capabilities are exposed through CLI subcommands (`easyeda <domain> <verb>`). Validation completed for the version 1.4.2, and the remaining checks, are listed in [1.4 release and validation](docs/release-1.4.md).
+Capabilities are exposed through CLI subcommands (`easyeda <domain> <verb>`). Validation completed for version 1.4.3, including its remaining limits, is listed in [1.4 release and validation](docs/release-1.4.md).
 
 **Schematic**
 - Place real library/LCSC parts by uuid, then wire them (`sch` place/wire); power/ground **net-flags** via `connect_pin` (auto-compensates the rotation-store quirk).
-- **Data and composition**: stable component IDs, pins, nets, and NC in the canonical graph; valid numeric designators remain unchanged, with functional names stored as Role. `sch compose` arranges already-designed Lib geometry offline, left to right from the top left, in equal-height Z-order rows on one sheet. It does not infer arbitrary peripheral circuits, paginate, or delete source pages.
+- **Data and composition**: stable component IDs, pins, nets, and NC in the canonical graph; valid numeric designators remain unchanged, with functional names stored as Role. `sch compose` arranges already-designed Lib geometry offline in Z order from the top left. Each frame shrinks around its own contents with a minimum inset; blocks in one row share a top edge, and the next row advances by that row's maximum height. It does not infer arbitrary peripheral circuits, paginate, or delete source pages.
 - **Frames and conversion**: `sch frame apply/check` draws and verifies pink dashed frames with 0.2 inch titles, using free space above or below the circuit. `sch apply` executes a sequential queue with precondition checks and pin/net/NC/geometry readback; a failed run requires a fresh read and plan.
 - **Validation and export**: the four-stage `sch gate --strict` runs layout-lint → check → bridge-check → drc; `sch read`, BOM/netlist export, and document SVG/PNG/PDF export provide structured evidence.
 

@@ -1,13 +1,13 @@
 # 快速开始 & 使用注意事项
 
-easyeda-agent 是一套**四件套**,四者必须**同版本、同时在位**才能端到端工作:
+easyeda-agent 有三个必须配套并保持同版的组成部分；EasyEDA Pro 是运行宿主：
 
 | 部件 | 是什么 | 装在哪 |
 |---|---|---|
 | **CLI / daemon** (`easyeda`) | 掌管 typed action 协议、状态、审计、产物、校验 | 本机 `PATH`(默认 `/usr/local/bin`) |
 | **连接器插件** (`.eext`) | 极薄桥接层,跑在 EasyEDA 内,把动作转成官方 `eda.*` 调用 | EasyEDA Pro「扩展管理」 |
 | **Skill** (`easyeda-agent`) | AI 客户端里的工作流、参考、脚本、规范 | `~/.claude/skills` 和/或 `~/.codex/skills` |
-| **EasyEDA Pro** | 官方编辑器,需开启「允许外部交互」 | 桌面应用 |
+| **EasyEDA Pro（宿主）** | 官方编辑器,需开启「允许外部交互」 | 桌面应用 |
 
 > **一句话记牢**:升级不是只升 CLI —— **CLI、连接器 `.eext`、Skill 三者要一起升到同一版本**,
 > 否则 `daemon health` 会把落后的连接器标成 stale(`connectorVersionOk:false`),动作会打不通。
@@ -34,7 +34,7 @@ curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main
 EASYEDA_INSTALL_SKILLS=codex,claude bash install.sh  # 指定目标
 EASYEDA_INSTALL_SKILLS=none bash install.sh         # 只装 CLI
 EASYEDA_SKILL_PRESERVE=1 bash install.sh            # 保留本地内容及旧版本标记
-EASYEDA_VERSION=v1.4.2 bash install.sh              # 锁定发布版，跳过 API 查询
+EASYEDA_VERSION='<vX.Y.Z>' bash install.sh          # 锁定发布版，跳过 API 查询
 ```
 
 > 装不上、报 `403`?脚本要调一次 `api.github.com` 查 latest release,匿名额度是每
@@ -53,7 +53,7 @@ daemon 默认固定监听 `60832`，连接器重试同一端口；不要额外�
 ### 3. 导入连接器 `.eext`
 
 从 [GitHub Release](https://github.com/zhoushoujianwork/easyeda-agent/releases/latest) 下载
-`easyeda-agent-connector.eext`(**与 CLI 严格同版**),或从[**立创官方插件市场**](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)一键安装(平台可原地自动更新,但**版本可能滞后 CLI** —— 需严格四件套同版时以 GitHub Release 的 `.eext` 为准),然后:
+`easyeda-agent-connector.eext`(**与 CLI 严格同版**),或从[**立创官方插件市场**](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)一键安装(平台可原地自动更新,但**版本可能滞后 CLI** —— 需严格三要素同版时以 GitHub Release 的 `.eext` 为准),然后:
 
 > EasyEDA Pro → **扩展管理 → 导入扩展** → 选中 `.eext` 文件
 
@@ -87,7 +87,7 @@ codex mcp add easyeda-agent \
 
 ---
 
-## 验证四件套是否对齐
+## 验证三要素是否对齐
 
 ```bash
 easyeda daemon health
@@ -100,7 +100,7 @@ easyeda daemon health
 
 ---
 
-## 升级注意事项(务必四件套一起升)
+## 升级注意事项(务必三要素一起升)
 
 1. **`easyeda update`** —— 升级 CLI 二进制 + Skill 目录(装过一次之后的常规路径):
    ```bash
@@ -129,7 +129,7 @@ easyeda daemon health
 - **Skill 目录自动同步**:`daemon start` 默认带 `--auto-update-skill`,启动时会**后台**
   把已存在的 Skill 目录拉齐到运行中的 CLI 发布版本，开发构建不自动写入，并把每一步打进
   daemon 日志。客户端目录遵循 `CODEX_HOME` / `CLAUDE_CONFIG_DIR`，默认仍为
-  `~/.codex` / `~/.claude`。这是 1.4.2 安装验证后补充的修复，需随维护版本发布。尊重
+  `~/.codex` / `~/.claude`。尊重
   `EASYEDA_SKILL_PRESERVE=1`(保留本地改动);关掉用 `daemon start --auto-update-skill=false`。
   手动触发/查看:
   ```bash
@@ -142,7 +142,7 @@ easyeda daemon health
   **侧载**(GitHub Release)的连接器 `.eext` **无法**被 daemon 静默替换(sideload 无原地自动更新),
   所以这里只**检测+提示**,重导那步仍需你手动做(见上)。若连接器是从
   [**立创插件市场**](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)装的,
-  平台**可原地自动更新** —— 但市场版本可能滞后 CLI,严格四件套同版仍以 GitHub Release 的 `.eext` 为准。
+  平台**可原地自动更新** —— 但市场版本可能滞后 CLI,严格三要素同版仍以 GitHub Release 的 `.eext` 为准。
 
 ---
 
@@ -155,6 +155,24 @@ easyeda daemon health
 | `connectorVersionOk:false` | `.eext` 落后 / 旧窗口没重启 | 重导 `.eext` + 彻底重启 EasyEDA |
 | 重导 `.eext` 后没生效 | EasyEDA 按 uuid 去重,旧的没卸载 | 「已安装」里先卸载旧的再导入 |
 | `easyeda: command not found` | `PATH` 没含安装目录 | 把 `/usr/local/bin` 加进 `~/.zshrc` |
-| 国内装 skill 失败 | skillhub.cn 无 CLI 接口 | 用一键脚本,或从 Release 下 `skills.tar.gz` 解压到 skills 目录 |
+| registry 安装的 Skill 版本不同 | registry 审核或同步有延迟 | 用一键脚本,或从同一 Release 下 `skills.tar.gz` 解压到 skills 目录 |
+
+## 给 AI Agent 的推荐引导 Prompt
+
+```text
+请使用 easyeda-agent 完成 EasyEDA Pro 任务。
+
+开始前先确认 easyeda CLI/daemon、easyeda-agent Skill、EDA Agent Connector 插件
+处于同一发布版本。运行 easyeda update --check --exit-code；CLI 或 Skill 落后时运行
+easyeda update，Connector 落后时安装同一 GitHub Release 的
+easyeda-agent-connector.eext，保存文档并完全退出、重开 EasyEDA。确认已开启“允许外部
+交互”，运行 easyeda health 核对目标工程、页面和版本。
+
+绘制原理图时先读取或建立本地 canonical connectivity JSON，以器件、完整物理引脚、
+稳定网络 ID、pin→net/NC 为权威数据；先在本地计算器件 XY、朝向、连线与功能 Lib，
+再生成 diff/Apply 队列。Apply 后逐脚回读，运行 layout-lint、check、bridge-check、DRC，
+显式保存并导出图片检查。不要直接依赖截图猜接，不修改原位号，不把 GPIO 号当器件物理
+脚号，也不要把未验证或仍有 WARN 的结果描述成通过。
+```
 
 延伸阅读:[功能清单与路线图](FEATURES.md) · [架构](architecture.md) · [开发环境与调试手册](dev-environment.md)

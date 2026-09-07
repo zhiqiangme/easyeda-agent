@@ -16,7 +16,7 @@
 
 ![easyeda-agent workflow](docs/assets/easyeda-agent-workflow.svg)
 
-> **1.4.2 版本。** 原理图以器件、引脚与连接图为依据,先在本地数据中设计
+> **1.4.3 版本。** 原理图以器件、引脚与连接图为依据,先在本地数据中设计
 > Lib 电路与几何,再通过 `sch compose` 组合单页、`sch apply` 顺序执行并回读验证。
 > 发布状态、构建步骤与尚未完成的验收见 [1.4 发布与验证](docs/release-1.4.md)。
 
@@ -60,7 +60,7 @@
 | 能力域 | 做什么 |
 |---|---|
 | **电路块库(旗舰特色)** | 社区共建、署名可追的**成熟外设电路库**(`easyeda blocks`,**37 块:19 ready / 13 verified / 5 draft**):CH340 USB 串口、ESP32 自动下载、按键去抖、USB-HUB、降压…`sch block-apply` **一条命令放件 + 连线 + 网表对账**,照抄拓扑、只重绑引脚网络即可复用 |
-| 原理图 | canonical 连接图 → Lib 局部几何 → `sch compose` 单页 Z 字等高行组合 → `sch apply`;正常位号与功能 Role 分离,粉色虚线方框配 0.2 inch 标题,按上下空档压缩高度 |
+| 原理图 | canonical 连接图 → Lib 局部几何 → `sch compose` 单页紧凑 Z 字组合 → `sch apply`;正常位号与功能 Role 分离,粉色虚线方框配 0.2 inch 标题,每框按内容独立收紧并保留最小内边距 |
 | 机械门禁与审计 | 本地数据检查、Apply 后逐脚/网络/NC/几何回读;`sch gate --strict` 四阶段(layout-lint→check→bridge-check→drc);跨页网名审计 `sch nets --strict` + 块对账 `sch reconcile` |
 | PCB | 自动布局、板框、禁布区、规则感知短线布线、4 层电源平面、铺铜、丝印避让、DRC/`pcb check` |
 | 设计流程 | 从**客户口吻需求**到成品的门控主脊(S0–S6 + P0–P10),里程碑确认,存盘检查点 |
@@ -85,12 +85,12 @@ USB-HUB…这些电路的**内部拓扑是死的**,每次重画等于重趟坑�
 
 ## 安装
 
-> **完整上手 & 使用注意事项见 [快速开始 →](docs/quick-start.md)** —— 四件套
-> (CLI / 连接器 `.eext` / Skill / EasyEDA)的安装、版本对齐、启动 daemon、升级纪律
+> **完整上手 & 使用注意事项见 [快速开始 →](docs/quick-start.md)** —— 三要素
+> (CLI / 连接器 `.eext` / Skill)的安装、版本对齐、启动 daemon、升级纪律
 > 与常见卡点速查,一页讲清。下面是精简版。
 
-easyeda-agent 是一套**四件套**,四者需**同时在位**:CLI/daemon、连接器
-`.eext` 插件、`easyeda-agent` Skill、开启「允许外部交互」的 EasyEDA Pro。**升级时
+easyeda-agent 有三个必须配套的组成部分:CLI/daemon、连接器 `.eext` 插件和
+`easyeda-agent` Skill；EasyEDA Pro 是运行它们的宿主,需开启「允许外部交互」。**升级时
 三方(CLI + 连接器 + Skill)要一起升到同一版本**,否则 `easyeda daemon health` 会把
 落后的连接器标成 stale。
 
@@ -152,6 +152,31 @@ clawhub install easyeda-agent
 > 需要与 CLI/连接器保持同版时,使用上面的一键安装器或 GitHub Release 的 `skills.tar.gz`。
 
 > EasyEDA 需开启「**允许外部交互**」,连接器的 WebSocket 才能连到本地 daemon。
+
+### 给 AI Agent 的推荐引导 Prompt
+
+把下面内容连同具体设计需求交给 Agent。它要求 Agent 先确认工具链和数据证据，再写入
+EDA，避免直接从截图猜接或在页面上反复试摆：
+
+```text
+请使用 easyeda-agent 完成 EasyEDA Pro 任务。
+
+开始前先确认三个组成部分处于同一发布版本：
+1. easyeda CLI/daemon
+2. easyeda-agent Skill
+3. EDA Agent Connector 插件
+
+运行 easyeda update --check --exit-code。CLI 或 Skill 落后时运行 easyeda update；
+Connector 落后时安装同一 GitHub Release 的 easyeda-agent-connector.eext，保存文档并
+完全退出、重开 EasyEDA。确认已开启“允许外部交互”，运行 easyeda health 核对目标工程、
+页面和版本。
+
+绘制原理图时先读取或建立本地 canonical connectivity JSON，以器件、完整物理引脚、
+稳定网络 ID、pin→net/NC 为权威数据；先在本地计算器件 XY、朝向、连线与功能 Lib，
+再生成 diff/Apply 队列。Apply 后逐脚回读，运行 layout-lint、check、bridge-check、DRC，
+显式保存并导出图片检查。不要直接依赖截图猜接，不修改原位号，不把 GPIO 号当器件物理
+脚号，也不要把未验证或仍有 WARN 的结果描述成通过。
+```
 
 ### 可选:MCP 接入
 
@@ -229,16 +254,16 @@ P3 USB 页:CH340 USB 串口、USB-C 接口、自动下载等四个功能分区�
 
 > 官方引擎在真正调用 `autoLayout()` 前会二次核对同一页的部件姿态、sheet 与全部 connectivity（wire/bus/net marker），并在启动变异的同一个 JS action 内再锁一次 document/input；`--rewire` 还核对完整网表，输入漂移立即拒绝。bus 目前无法可靠重建，即使 `--rewire` 也拒绝。后续 snap/重连/save 继续钉在同一 UUID；几何回读、`sch check`、重连或持久化任何一步不可用，或残留 overlap / pin 重合 / dangling 等结构性问题，都会非零退出。官方 API 没有事务回滚，因此 post-check 失败表示“页面已变但未过门”，必须先修复或撤销。
 
-> **优先级铁律**:命中电路块 → `sch block-apply` 模板;有 S0 分区 spec → `--engine template`;都没有才 `--engine official` 兜底。功能分组的模板版是首选,官方引擎只作未建模页面的起点。**下版优化**:放置避让标题栏 keep-out、分区区域线 + 文本注释(`sch zone-draw` 已提供,待接入自动放置流程)。
+> **优先级铁律**:命中电路块 → `sch block-apply` 模板;有 S0 分区 spec → `--engine template`;都没有才 `--engine official` 兜底。功能分组的模板版是首选,官方引擎只作未建模页面的起点。分区方框与标题由本地数据计算后通过 `sch frame apply/check` 写入和核验。
 
 ## 能力清单(已支持)
 
-以 typed CLI 子命令暴露(`easyeda <domain> <verb>`)。1.4.2 的验证范围与未完成项见 [1.4 发布与验证](docs/release-1.4.md)。
+以 typed CLI 子命令暴露(`easyeda <domain> <verb>`)。1.4.3 的验证范围与未完成项见 [1.4 发布与验证](docs/release-1.4.md)。
 
 **原理图** — 完整功能地图(已支持 40+ 子命令按功能域 + 待支持路线)见 **[docs/cli/schematic.md](docs/cli/schematic.md)**(CLI 功能索引:[docs/cli/](docs/cli/README.md));摘要:
 - **器件与库**:从立创/LCSC 库按 uuid 放**真实器件**、换型号(`replace`)、符号/封装重绑、C 号确定性解析(`resolve-lcsc`);`modify` 属性 **merge 语义**(只 patch 顶层字段不再清空自定义属性,#175)。
 - **连线**:`connect`/`autoconnect`(**打分器**自选方向——碰撞/穿件/图签/fanout 全几何成本,netport **竖排折叠惩罚**让密集引脚列标签保持水平)/`disconnect` 成对删;电源/地标志自动补偿旋转存储的坑。
-- **数据与布局**:连接图保留稳定器件 ID、引脚、网络与 NC;合法数字位号保持原样,功能名称存 Role。`sch compose` 基于已设计的 Lib 几何离线组合单页,从左上向右按 Z 字排列、各行等高;`sch frame apply/check` 生成并检查粉色虚线框与 0.2 inch 标题,优先利用电路上下空档。组合器不推导任意外围电路、不自动分页或删除源页。
+- **数据与布局**:连接图保留稳定器件 ID、引脚、网络与 NC;合法数字位号保持原样,功能名称存 Role。`sch compose` 基于已设计的 Lib 几何离线组合单页,从左上向右按 Z 字排列；每框按内部内容独立收紧,同行顶齐,下一行按本行最大高度推进。`sch frame apply/check` 生成并检查保留最小内边距的粉色虚线框与 0.2 inch 标题。组合器不推导任意外围电路、不自动分页或删除源页。
 - **转换与校验**:`sch apply` 串行执行规划队列,核对前置状态并回读引脚/网络/NC/几何;失败后重读重规划。`sch gate --strict` 四阶段(layout-lint→check→bridge-check→drc),覆盖重叠、悬空、短路与官方 DRC;`layout-score` 提供布局质量诊断。
 - **跨页网名审计与对账**:`sch nets --strict`(网名变体/单引脚网机械拦截)+ `sch reconcile` 设计意图对账 + netlist **黄金表逐脚比对**——「接得合法」与「接对没有」分别有门。
 - **电路块库**:`block-apply` 一键实例化验证过的拓扑(37 块:19 ready / 13 verified / 5 draft,离线可查),放件+连线+网表对账一条命令;`extract-layout` 真板反推模板。

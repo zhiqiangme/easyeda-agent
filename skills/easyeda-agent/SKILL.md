@@ -5,19 +5,21 @@ license: MIT
 compatibility: "Requires the local easyeda CLI/daemon and EasyEDA Agent Connector with Allow external interaction enabled. Python 3 is used by bundled helpers; online library lookup and updates need network access."
 metadata:
   author: zhoushoujianwork
-  version: "1.4.2"
+  version: "1.4.3"
   homepage: "https://github.com/zhoushoujianwork/easyeda-agent"
 ---
 
 # EasyEDA Agent
 
-用 typed CLI 经 WebSocket 调用 EasyEDA Pro 官方 `eda.*` API。CLI/daemon 和连接器需另行安装；
-这是社区 Skill。安装、升级或连接异常时读 [environment-setup.md](references/environment-setup.md)。
+用 typed CLI 经 WebSocket 调用 EasyEDA Pro 官方 `eda.*` API。CLI/daemon、此 Skill 和
+连接器是必须同版的三个组成部分；EasyEDA Pro 是宿主。安装、升级或连接异常时读
+[environment-setup.md](references/environment-setup.md)。
 
 ## 开始工作
 
 1. 按用户任务选择下表中的流程，只加载相关参考。已有项目的小修复沿用已确认的需求和授权。
-2. 编辑器操作前运行 `easyeda health`，确认工程、活动页和连接器版本。
+2. 首次写入前运行 `easyeda update --check --exit-code` 核对三方版本，再运行
+   `easyeda health` 确认工程、活动页和连接器；版本不齐时按环境说明升级后继续。
 3. 手动命令用 `--project <project>` 指定工程；变更带 `--doc <page>`，操作已有页面。
    已生成的受保护 Apply 队列沿用其固定目标，不再用名称覆盖。
    先读取将要修改的器件、引脚、网络及几何；位号或 primitiveId 不明确时不能盲写。
