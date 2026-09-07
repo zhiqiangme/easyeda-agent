@@ -62,7 +62,9 @@ metadata:
 数据字段、可运行命令及失败恢复集中在 [schematic-data.md](references/schematic-data.md)。
 `sch design-diff` 对账位号、库身份、引脚及几何；两份完整计划还比较导线/框/标题。
 覆盖范围和未验证项随结果报告，不能把 canonical 一致当作实际图面已同步。
-`sch plan` 只支持明确的标记连接增量；`materialize` 只负责基础放置，不能代替完整 Lib 组合。
+`sch plan` 只支持明确的标记连接增量；目标同时取消该脚 NC 并新增明确标记连接时，
+队列先清该脚 NC、核对中间状态，再连接并回读；禁止单独清 NC 或跳步执行。
+`materialize` 只负责基础放置，不能代替完整 Lib 组合。
 原理图 `sch autolayout` 与 PCB 自动布线是不同功能，按各自参考使用。
 
 ## 执行与验证约束

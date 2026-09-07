@@ -431,7 +431,8 @@ func canonicalDesignState(input Document) (map[string]any, error) {
 			return nil, fmt.Errorf("%s.%s cannot be both connected and NC", c.ComponentID, c.PinNumber)
 		}
 		switch c.Kind {
-		case "", "pin_net", "netlist", "wire", "netflag", "netport", "netlabel":
+		case "", "pin_net", "netlist", "wire", "netflag", "netport", "netlabel",
+			"power", "ground", "net_port_in", "net_port_out", "net_port_bi":
 		default:
 			return nil, fmt.Errorf("connection %s.%s has unsupported kind %q", c.ComponentID, c.PinNumber, c.Kind)
 		}

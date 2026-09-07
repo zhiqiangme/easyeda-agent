@@ -866,6 +866,7 @@ func newAutoconnectCmd(cfg *appConfig, window *string, stdout, stderr io.Writer)
 		x, y                         float64
 		avoidTitleBlock, avoidFanout bool
 		offsetMin, offsetMax, step   float64
+		offsetCap                    float64
 		allPages, dryRun, asJSON     bool
 		replace, strict              bool
 	)
@@ -916,6 +917,9 @@ unless you pass --replace, which deletes the old flag+wire and reconnects.`,
 			if cmd.Flags().Changed("offset-step") {
 				rules.OffsetStep = step
 			}
+			if cmd.Flags().Changed("offset-cap") {
+				rules.OffsetCap = offsetCap
+			}
 
 			var conns []acConnSpec
 			if spec != "" {
@@ -951,6 +955,9 @@ unless you pass --replace, which deletes the old flag+wire and reconnects.`,
 				}
 				conns = append(conns, cs)
 			}
+			if cmd.Flags().Changed("offset-cap") && (math.IsNaN(offsetCap) || math.IsInf(offsetCap, 0) || offsetCap <= 0 || offsetCap < rules.OffsetMin) {
+				return fmt.Errorf("--offset-cap must be finite, positive and at least --offset-min")
+			}
 
 			_, err := runAutoconnectOpts(cfg, *window, conns, rules,
 				acRunOpts{AllPages: allPages, DryRun: dryRun, Replace: replace, JSON: asJSON, Strict: strict},
@@ -971,6 +978,7 @@ unless you pass --replace, which deletes the old flag+wire and reconnects.`,
 	c.Flags().Float64Var(&offsetMin, "offset-min", 18, "minimum stub offset to consider")
 	c.Flags().Float64Var(&offsetMax, "offset-max", 80, "maximum stub offset to consider")
 	c.Flags().Float64Var(&step, "offset-step", 6, "offset increment")
+	c.Flags().Float64Var(&offsetCap, "offset-cap", 0, "hard maximum stub offset across regular, staggered and extended candidates (omit for no cap)")
 	c.Flags().BoolVar(&allPages, "all-pages", false, "widen candidate SCORING to all schematic pages (avoids cross-page label conflicts); does NOT build wires across pages — mutations only land on the ACTIVE page, so `doc switch` to the target page first")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "plan and print the selection without mutating")
 	c.Flags().BoolVar(&replace, "replace", false, "when a pin is already on a DIFFERENT net, delete its old flag+wire and reconnect (without --replace such pins error out; pins already on the target net are always skipped)")

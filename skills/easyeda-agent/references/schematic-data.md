@@ -53,9 +53,16 @@ FOOTPRINT `DOCHEAD` 和唯一 `META.source` 证明实例封装到库资产的出
 | 非标准位号修复 | `sch designators allocate` 分配，`plan` 编译原地修改队列，`verify` 执行前后校验。 |
 | 完整 Lib 图面 | `sch compose`：完整连接核心与局部几何 → 单页布局与受保护 Apply。 |
 | 基础放置 | `sch materialize`：已知库身份和 placement → 放件队列，可选逐脚标记。它不是完整模块绘图器。 |
-| 明确的标记增量 | `sch plan before.json after.json`：仅新增指定 kind 的电源/地/网络端口连接；对应脚原为 `unconnected` 时，目标移除此声明并新增连接。其他器件/引脚/NC 变更、删网或重接均拒绝；逐步回读仍核对明确悬空及 NC。 |
+| 明确的标记增量 | `sch plan before.json after.json`：仅新增 `power/ground/net_port_in/net_port_out/net_port_bi` 连接；对应脚原为 `unconnected` 时，目标移除此声明；原为 NC 时，目标须同时清 NC 并新增明确标记连接。其他器件/引脚/NC 变更、删网或重接均拒绝。 |
 | 只画框和标题 | `sch frame apply/check --from frames.json`；字段见 `sch frame --help` 与 [actions.md](actions.md)。 |
 | 执行队列 | `sch apply plan.json`，顺序等待 WebSocket 响应并记录 journal。 |
+
+`sch plan` 的 NC→连接转换逐脚执行：初始完整连接守卫 → `no_connect off` →
+明确空网/非 NC 的中间守卫 → autoconnect → 目标守卫 → 保存及最终守卫。
+这不删除器件引脚，不清理其他 NC；单独清 NC、同一脚 NC 与连接并存均拒绝。
+队列必须完整执行，失败后重新回读并生成，不能 `--resume/--from/--to` 跳步。
+新队列显式指定引线常规搜索 10～80 raw、步进 5 raw，扩展错长的硬上限 300 raw
+（`sch autoconnect --offset-cap`）；保持 5 raw 网格并严格拒绝碰撞，找不到合法位置时停止。
 
 ### 本地版本与 EDA 回读对账
 
@@ -159,6 +166,12 @@ ref 引用也要按组件 ID 同步；不要对 JSON 做全局字符串替换，
 可选 `maxCandidates` 限制整份输入的搜索次数（默认 20000，范围 1..1000000）；耗尽时明确报错，不写出半成品。
 这是有界、保持实测姿态的求解器，失败不证明电路在任意朝向下都无解。改变朝向须重新提供
 对应可信几何；不能放宽碰撞检查或修改网表来取得通过。已有手工设计好的 Lib 仍可直接 compose。
+
+当前命名引线采用贪心搜索：地优先，其余处理顺序受器件和测量引脚数组影响，不会联合回溯
+已选标记。因此相同连接图与姿态可能因数组顺序产生不同结果。保留失败输入和最终计算参数，
+不把一次排序成功当作通用布局规则。若从官方实测姿态推导 90 度刚体变换，须同步变换锚点、
+完整引脚、bbox 四角和 stored rotation，并记录原始测量与变换；Apply 的写线前引脚回读必须通过。
+模块单独求解成功后仍须通过整页 compose 的边距与图签检查。
 
 ```bash
 easyeda sch lib-layout --from layout-input.json --out composition.json
