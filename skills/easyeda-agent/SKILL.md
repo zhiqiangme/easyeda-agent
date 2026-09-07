@@ -26,7 +26,7 @@ metadata:
 
 | 任务 | 先读 |
 |---|---|
-| 本地原理图数据、Lib 组合、修复位号、Apply | [schematic-data.md](references/schematic-data.md) |
+| 本地原理图数据、版本对账、Lib 组合、修复位号、Apply | [schematic-data.md](references/schematic-data.md) |
 | 已有原理图检查或器件/连线小修 | [schematic.md](references/schematic.md)；具体接线见 [schematic-wiring.md](references/schematic-wiring.md) |
 | 原理图排版、已有连线的移动/整理 | [schematic-placement.md](references/schematic-placement.md)、[auto-layout-sop.md](references/auto-layout-sop.md) |
 | 从需求到整板、原理图转 PCB | [design-flow.md](references/design-flow.md)；未确定的设计选项见 [design-decisions.md](references/design-decisions.md) |
@@ -47,7 +47,8 @@ metadata:
   端子也不强制改为 `J`。不从 ID 反推 ref，不覆盖原生 `uniqueId`。
 - 按功能组织 Lib：核心器件加外围，以真实短线连接。VCC/GND 可局部重复放置；
   标签用于电源或模块边界，不替代连接图。多引脚同功能（例如 AMS1117 双 VOUT）逐脚核对。
-- 从官方接口读取器件与引脚几何，写入源 JSON。`sch compose` 在本地计算端子直线错长、
+- 从官方接口读取器件与引脚几何，保留测量源；先在本地设计 Lib 内部位置与导线。
+  自编计算须保留脚本和参数，让输入能够重现目标 JSON。`sch compose` 消费已设计的模块几何，计算端子直线错长、
   紧凑标题和左上起排的 Z 字等高布局。默认 A4 一页，容量不足按已确认的功能拆页。
   它不自动补电路、旋转器件、缩放符号或创建页面。
 - 每个 Lib 带粉色虚线框和 **0.2 inch = 20 raw** 标题。固定贴边尺寸为 **10 raw**，
@@ -58,6 +59,7 @@ metadata:
   连接正确与布局可读都要验证，不能以截图或单个 DRC 数字代替数据对账。
 
 数据字段、可运行命令及失败恢复集中在 [schematic-data.md](references/schematic-data.md)。
+`connectivity-diff` 为空只表示其覆盖的连接无差异；位号、库身份与几何还需独立对账，不能据此称为最新版本。
 `sch plan` 只支持明确的标记连接增量；`materialize` 只负责基础放置，不能代替完整 Lib 组合。
 原理图 `sch autolayout` 与 PCB 自动布线是不同功能，按各自参考使用。
 
