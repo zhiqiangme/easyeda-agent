@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Keep PCB document and board metadata readable after mutations so `doc reload` can recover stale primitive reads; metadata reads do not clear the stale-read gate.
+
 - Fix PCB silk text creation: use registered `default` font and legal LEFT_TOP alignment in free text, net names and pad labels; empty font / alignment 0 was rejected by EasyEDA 3.2.186.
 
 - Let an exact `--doc` UUID use matching live document/result context without depending on the PCB name catalogue. Reject inconsistent project, document or type evidence.
