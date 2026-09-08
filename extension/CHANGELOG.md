@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Recover an active PCB missing from document enumeration using official current-PCB information, requiring matching project/document identity before accepting the name (#190).
+- Accept action request bodies up to 32 MiB for base64 3D model imports (#199); test the exact limit and one-byte overflow.
+
 - Add `sch modify --patch-file` and `pcb modify --patch-file` for PowerShell 5.1 JSON quoting failures (#192). Accept UTF-8 BOM files, reject conflicting inline/file sources and non-object JSON before dispatch, and preserve explicit schematic flag overrides and PCB center guards.
 - Document native net-label API compatibility limits and readback requirements (#191).
 
