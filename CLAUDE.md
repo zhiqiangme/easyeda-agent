@@ -52,7 +52,11 @@ reply as chiense! reply as chiense! reply as chiense!
 
 **Commit directly on `main` — do NOT create feature branches.** Develop and commit
 on `main` by default (user preference). Don't `git checkout -b`; just commit to
-`main`. Push only when explicitly asked.
+`main`. When the user asks to submit fixes, update GitHub progress, or handle PRs,
+that authorizes committing and pushing the related verified changes without a
+second push confirmation. After the adopted changes are on remote `main` and
+relevant CI passes, close a fully adopted PR with a linked adoption commit.
+Keep unresolved issues open and report remaining validation gaps accurately.
 
 ## Layout
 

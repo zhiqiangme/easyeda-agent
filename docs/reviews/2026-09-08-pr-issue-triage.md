@@ -1,10 +1,13 @@
 # PR / Issue 排查（2026-09-08）
 
-当前远端同步状态（2026-09-09）：已向 #190、#192、#201、#191、#200 和 PR #199
-发布验证进度；明确标注本地修复尚未推送、平台原生验证限制及未解决项。Issue 与 PR
-均保留开放。以下开头表格为首次排查快照，最终实测结果见后续各节。
+当前远端同步状态（2026-09-09）：13 个修复及记录提交已推送到 main（至 d1dc9dd），
+[对应 CI](https://github.com/zhoushoujianwork/easyeda-agent/actions/runs/34250243475)
+4 个 job 全部通过。PR #199 已按“完整采纳到 main”关闭；已更新 #190、#192、#201、
+#191、#200 的已有进度评论，Issue 仍保留开放。Windows PowerShell 5.1 原生测试已通过，
+完整 Windows DSH 安装及其余宿主/整板验收缺口仍保留。尚未发布新版本。
+以下开头表格与中间各节为历史排查快照，最新结论见文末“推送、CI 与 PR 收尾”。
 
-本轮读取全部 1 个开放 PR、6 个开放 Issue 及评论；下表为首次排查快照。后续实际修复见本文末尾，尚未向 GitHub 发评论、合并或关闭。
+首次排查时读取全部 1 个开放 PR、6 个开放 Issue 及评论；下表保留当时的判断。
 
 | 项目 | 结论及本轮处理 | 后续验收 |
 |---|---|---|
@@ -210,3 +213,31 @@ Windows DSH 真机验收。CI 已接入，未推送触发。
 原 2MiB 请求测试保留，本地新增 32MiB 精确边界与多 1 字节拒绝测试，署名保留。
 针对请求体的回归再次通过。当前远端尚无采用提交，因此未关闭 PR；推送并完成 CI 后
 可按“已在 main 采纳”关闭，无需重复合入相同实现。
+
+## 推送、CI 与 PR 收尾（2026-09-09）
+
+用户要求去掉重复 push 确认限制。本地 AGENTS.md 与仓库 CLAUDE.md 已同步约定：
+要求提交修复、更新 GitHub 进度或处理 PR，即授权提交并推送相关已验证改动；采纳提交
+进入远端 main 且相关 CI 通过后，可关联提交关闭完整采纳的 PR。未解决的 issue 继续开放。
+
+13 个提交已从 ed91d03 推送至 d1dc9dd；
+[CI 34250243475](https://github.com/zhoushoujianwork/easyeda-agent/actions/runs/34250243475)
+对应的 headSha 为 d1dc9dd6ab8305184c3c41b89a53658c57651ed2，4 个 job 全部通过：
+Ubuntu 的 CLI/connector/Skill 全套与 Ubuntu/macOS/Windows 原生 smoke。
+
+- [Windows 日志](https://github.com/zhoushoujianwork/easyeda-agent/actions/runs/34250243475/job/102142525960)
+  明确记录 TestModifyPatchWindowsPowerShell51/sch 与 /pcb PASS；真实 powershell.exe
+  硬校验 5.1 后，生成带空格路径的 UTF-8 BOM 文件并调用新编译的 easyeda.exe，核对
+  模拟 daemon payload。这补齐 #192 的 Windows 参数解析边界；Windows 编辑器整套
+  实机链路仍未运行。
+- Windows DSH 路径测试 7/7 通过，包含特殊字符实际路径的 Node 入口启动与 Skill
+  读取。该 Windows 测试使用测试入口文件；完整 DSH loader 的集成测试仍只在 Mac
+  完成，不能将此写为 Windows 完整安装验收通过。
+- [PR #199](https://github.com/zhoushoujianwork/easyeda-agent/pull/199)
+  已关闭为“已采纳”，关联远端采用提交
+  [cf36d45](https://github.com/zhoushoujianwork/easyeda-agent/commit/cf36d45e4c554b88cfc0686d4925a536b3373d54)，
+  保留原作者署名。入口与大小边界通过，实际 3D 模型导入未验收。
+- 上节列出的 6 条 GitHub 评论已原位更新，保留各 issue 的实测范围与未完成项。
+  #190/#192/#201 继续跟进发布与安装/报告者复验；#191/#200/#173/#43 未解决。
+
+本次收尾未修改产品代码，不新增发布或整板验收声明。
