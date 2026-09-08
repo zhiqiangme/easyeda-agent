@@ -291,6 +291,36 @@ func discoverDocs(cfg *appConfig, window string) (docs []openableDoc, activeUUID
 		}
 	}
 
+	// #190: the host may temporarily omit the active PCB from getAllPcbsInfo.
+	// Recover its name from the independent current-PCB API, never from a cached
+	// name or the user's selector. Both reads must identify the same document and
+	// project; otherwise the user may have switched tabs during enumeration.
+	if cur.Context != nil && cur.Context.DocumentType == "pcb" && activeUUID != "" {
+		found := false
+		for _, d := range docs {
+			if d.UUID == activeUUID && d.Type == "pcb" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			probeCfg := *cfg
+			probeCfg.doc = "" // discovery must not recurse through the --doc guard
+			info, ierr := requestAction(&probeCfg, "pcb.board.info", resolvedWindow, nil)
+			if ierr != nil {
+				return nil, "", "", fmt.Errorf("PCB document enumeration incomplete: active PCB %s is missing; current-PCB lookup failed: %w", activeUUID, ierr)
+			}
+			pcb, _ := info.Result["pcb"].(map[string]any)
+			if info.Context == nil || cur.Context.ProjectUUID == "" ||
+				info.Context.ProjectUUID != cur.Context.ProjectUUID ||
+				info.Context.DocumentUUID != activeUUID || info.Context.DocumentType != "pcb" ||
+				strField(pcb, "uuid") != activeUUID || strField(pcb, "name") == "" {
+				return nil, "", "", fmt.Errorf("PCB document enumeration incomplete: current-PCB lookup does not confirm active PCB %s in the same project; refusing to guess the target", activeUUID)
+			}
+			docs = append(docs, openableDoc{UUID: activeUUID, Type: "pcb", Name: strField(pcb, "name"), Parent: cur.Context.ProjectUUID})
+		}
+	}
+
 	for i := range docs {
 		if docs[i].UUID != "" && docs[i].UUID == activeUUID {
 			docs[i].Active = true
