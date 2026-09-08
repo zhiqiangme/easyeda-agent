@@ -59,6 +59,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify DSH bundle file paths and native Node launch
+        run: node --test scripts/tests/test_dsh_bundle.mjs
       - name: Verify native download, version check and temporary replacement
         run: go test ./internal/selfupdate -run '^TestNativeDownloadedBinaryVerificationAndReplacement$' -count=1 -v
       - name: Verify component patch files and legacy PowerShell argument passing

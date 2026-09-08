@@ -30,6 +30,13 @@ profile 的活跃 bundle 层，注入两个行：
    `skills/easyeda-agent`，注册进 skill 注册表 global layer（web 下 host 的
    skill-filesystem 被官方 bundle 禁用、preset 自有发现，故用隔离实例，不冲突）。
 
+两处文件路径都由 Node 内置 `fileURLToPath` 转换，不直接读取 URL 的 `pathname`。
+后者在 Windows 会留下 `/C:/...`，导致 Node 启动 MCP 时报 `C:\C:\... MODULE_NOT_FOUND`
+（[#201](https://github.com/zhoushoujianwork/easyeda-agent/issues/201)），还会丢失 UNC 的
+服务器名。转换同时保留中文、空格、`#` 和 `%`。`!!js` 通过
+`process.getBuiltinModule('node:url')` 访问内置模块，兼容本包最低 Node 20.17，
+不依赖 loader 是否提供 `require`。已有安装需更新 bundle 并重启 DSH。
+
 **已验证（2026-08-14）**：`dsh plugin add file:...` 到 headless profile → 自动
 提升为 bundle 层 → headless 会话实测模型可见全部 11 个 `mcp__easyeda__*` 工具
 + `easyeda-agent` skill。`.npmignore` 已排除 bin/dist 等构建产物，`github:`
@@ -103,6 +110,21 @@ API 与当前 dsh 不匹配。**in-box 插件不需要装进 profile**——只�
 删掉。
 
 ### 验证
+
+路径回归（无额外 npm 依赖、无需启动编辑器或 daemon）：
+
+```bash
+node --test scripts/tests/test_dsh_bundle.mjs
+```
+
+该测试执行 bundle 中实际的两条路径表达式，覆盖 Windows 盘符和 UNC、POSIX、
+中文/空格/URL 转义；并在当前系统的临时 profile 中按解析路径启动 Node、读取 Skill。
+Windows 路径转换可以在 Mac 上用 Node 的 Windows 转换模式验证，但不等同于
+Windows DSH 实际启动。CI 的 macOS/Linux/Windows 原生安装矩阵均运行此测试。
+
+**路径修复已在 macOS 验证**：使用本机 DSH loader 1.0.2 解析实际 bundle YAML，
+在含中文、空格、`#`、`%` 的临时 profile 中定位包目录，启动仓库真实 stdio MCP，
+完成握手、11 个工具枚举和离线调用，并读取 Skill；未运行 Windows DSH。
 
 ```bash
 # 配置合并树（不启动服务）：应出现 easyeda-mcp 条目

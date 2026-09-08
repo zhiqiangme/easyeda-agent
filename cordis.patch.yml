@@ -14,6 +14,8 @@
 # = 该 profile 目录的 file:// URL）。包安装后位于 <profile>/node_modules/
 # easyeda-agent-dsh/，因此相对 baseUrl 的 node_modules/easyeda-agent-dsh/...
 # 即包内路径（pnpm 安装 github 依赖会带入整个仓库内容）。
+# 用 fileURLToPath 转本机路径，不能用 pathname（Windows 会产生 /C:/ 双盘符，
+# UNC 还会丢主机名）。getBuiltinModule 在最低 Node 20.17 可用，无需 require 注入。
 # 依赖本仓库的 Go CLI：EASYEDA_BIN 环境变量可覆盖，默认取 PATH 上的 easyeda。
 - insert:
     - id: easyeda-mcp
@@ -23,7 +25,7 @@
         transport: stdio
         command: node
         args:
-          - !!js "decodeURIComponent(new URL('node_modules/easyeda-agent-dsh/mcp/src/server.mjs', baseUrl).pathname)"
+          - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('node_modules/easyeda-agent-dsh/mcp/src/server.mjs', baseUrl))"
         env:
           EASYEDA_BIN: !!js "process.env.EASYEDA_BIN || 'easyeda'"
 
@@ -33,4 +35,4 @@
         providerName: easyeda
         includeDefaultRoots: false
         customSkillDirs:
-          - !!js "decodeURIComponent(new URL('node_modules/easyeda-agent-dsh/skills/easyeda-agent', baseUrl).pathname)"
+          - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('node_modules/easyeda-agent-dsh/skills/easyeda-agent', baseUrl))"

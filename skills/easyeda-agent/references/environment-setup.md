@@ -33,6 +33,12 @@ Skill 时用 `--create-missing`，保留本地 Skill 修改用 `--preserve`，�
 `easyeda update --skill-only --create-missing --version <version>` 安装 Skill。
 Git Bash/WSL 与原生 Windows 是不同运行环境，选择相应的二进制。
 
+DSH bundle 在 Windows 启动时报 `C:\C:\... MODULE_NOT_FOUND` 时，升级
+`easyeda-agent-dsh` bundle 并重启 DSH；这是 MCP/Skill 的文件 URL 路径转换问题。
+bundle 使用 Node 内置 `fileURLToPath` 同时解析 MCP server 与 Skill 目录，保留
+盘符、UNC、中文和空格；不要手工拼盘符或把 URL 的 `pathname` 当成本机文件路径。
+Node 版本遵循 bundle 的要求（至少 20.17）。
+
 安装/升级失败须保留非零退出码，不能只依据最后一行提示判定成功。普通 Skill 更新
 应替换完整发布目录，清理已删除的旧参考；`--preserve` 是混合本地内容，保留旧版本标记，
 不能宣称全部文件已升级。daemon 启动时只同步自身版本的 Skill，版本升级由显式
