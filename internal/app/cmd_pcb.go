@@ -569,7 +569,7 @@ schematic is active, so you pass them). Workflow:
 	// ── modify ────────────────────────────────────────────────────────────
 	// pcb.component.modify
 	{
-		var id, patchJSON string
+		var id, patchJSON, patchFile string
 		var center bool
 		var centerX, centerY float64
 		c := &cobra.Command{
@@ -593,12 +593,16 @@ rotate first ('--patch {"rotation":…}'), then --center in a second call.`,
 				if id == "" {
 					return fmt.Errorf("--id is required")
 				}
-				if patchJSON == "" && !center {
-					return fmt.Errorf("--patch is required (or --center --x --y)")
+				patchSource, err := readModifyPatchSource(cmd, patchJSON, patchFile)
+				if err != nil {
+					return err
+				}
+				if patchSource == "" && !center {
+					return fmt.Errorf("--patch or --patch-file is required (or --center --x --y)")
 				}
 				patch := map[string]any{}
-				if patchJSON != "" {
-					if err := json.Unmarshal([]byte(patchJSON), &patch); err != nil {
+				if patchSource != "" {
+					if err := json.Unmarshal([]byte(patchSource), &patch); err != nil {
 						return fmt.Errorf("invalid --patch json (expected object): %w", err)
 					}
 				}
@@ -627,6 +631,8 @@ rotate first ('--patch {"rotation":…}'), then --center in a second call.`,
 		}
 		c.Flags().StringVar(&id, "id", "", "component primitiveId (required)")
 		c.Flags().StringVar(&patchJSON, "patch", "", "JSON patch object, e.g. '{\"x\":1000,\"y\":2000}' (x/y = anchor)")
+		c.Flags().StringVar(&patchFile, "patch-file", "", "UTF-8 JSON patch file (BOM supported; mutually exclusive with --patch)")
+		c.MarkFlagsMutuallyExclusive("patch", "patch-file")
 		c.Flags().BoolVar(&center, "center", false, "interpret --x/--y as the desired BBOX CENTER (converted to anchor via the live bbox)")
 		c.Flags().Float64Var(&centerX, "x", 0, "desired bbox-center x (mil; with --center)")
 		c.Flags().Float64Var(&centerY, "y", 0, "desired bbox-center y (mil; with --center)")

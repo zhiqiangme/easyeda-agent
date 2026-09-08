@@ -114,3 +114,21 @@ easyeda sch sheet-geometry --project <project> --doc <page-uuid> --json
 必要的 `debug.exec_js` 只用于任务范围内的临时探测，输出须可 JSON 序列化。
 重复使用的操作应落实为 typed action 与 CLI，再同步 Skill。网表读取用
 `sch_ManufactureData.getNetlistFile()`，不要使用已废弃且可能挂起的 `sch_Netlist.getNetlist()`。
+
+### Windows PowerShell JSON 补丁（#192）
+
+`sch modify --id <pid> --patch-file patch.json` 从 UTF-8 文件读取 JSON 对象，支持 UTF-8 BOM，
+绕过 PowerShell 5.1 传递原生程序参数时剥离 JSON 引号的问题。`--patch-file` 与 `--patch` 互斥。
+PowerShell 可用 `'{"rotation":90}' | Set-Content -Encoding UTF8 patch.json` 创建补丁文件；
+不要使用默认输出 UTF-16 的 `Out-File`。
+原理图的显式 `--x/--y/--rotation/--designator` 仍覆盖文件中的同名键；
+PCB 的 `--center` 仍不允许补丁包含 x/y/rotation。
+
+### 原生 net_label 超时（#191）
+
+`createNetLabel(x, y, net)` 是标注 EDA v4 起提供的 BETA API。仓库在
+EasyEDA 3.2.186 的实测仍会挂起，手动 UI 能放标签不代表扩展 API 可用。
+不要通过改参数或连续重试处理此兼容性问题。超时后先回读实际连通和残留图元，
+再按电气语义选择受支持的 netport/netflag，或由用户在 UI 放置标签后回读验证。
+升级到支持该接口的宿主后仍须探测，不能只凭版本号宣称已修复。
+历史实测详见仓库 `docs/dev-environment.md` 的 Native net-label compatibility。

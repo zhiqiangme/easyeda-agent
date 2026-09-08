@@ -581,7 +581,7 @@ final placed state.`,
 	// ── modify ────────────────────────────────────────────────────────────
 	// schematic.component.modify
 	{
-		var id, patchJSON, designator string
+		var id, patchJSON, patchFile, designator string
 		var mx, my, mrot float64
 		c := &cobra.Command{
 			Use:   "modify",
@@ -625,6 +625,10 @@ platform still dropped is reported in result.notApplied (non-zero exit).`,
 				if id == "" {
 					return fmt.Errorf("--id is required")
 				}
+				patchSource, err := readModifyPatchSource(cmd, patchJSON, patchFile)
+				if err != nil {
+					return err
+				}
 				// Only EXPLICITLY-passed flags enter the patch (Changed guard):
 				// a default-zero --x must never overwrite a real position.
 				overrides := map[string]any{}
@@ -640,7 +644,7 @@ platform still dropped is reported in result.notApplied (non-zero exit).`,
 				if cmd.Flags().Changed("designator") {
 					overrides["designator"] = designator
 				}
-				patch, overridden, err := buildModifyPatch(patchJSON, overrides)
+				patch, overridden, err := buildModifyPatch(patchSource, overrides)
 				if err != nil {
 					return err
 				}
@@ -671,6 +675,8 @@ platform still dropped is reported in result.notApplied (non-zero exit).`,
 		c.Flags().Float64Var(&mrot, "rotation", 0, "new rotation in degrees (shortcut for --patch '{\"rotation\":…}')")
 		c.Flags().StringVar(&designator, "designator", "", "new designator, e.g. R12 (shortcut for --patch '{\"designator\":…}')")
 		c.Flags().StringVar(&patchJSON, "patch", "", "JSON object with fields to update (for keys without a shortcut flag: customAttributes, BOM flags, …)")
+		c.Flags().StringVar(&patchFile, "patch-file", "", "UTF-8 JSON patch file (BOM supported; mutually exclusive with --patch)")
+		c.MarkFlagsMutuallyExclusive("patch", "patch-file")
 		sch.AddCommand(c)
 	}
 

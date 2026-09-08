@@ -142,3 +142,12 @@ STALE_READ: pcb.components.list —— PCB 自 pcb.line.create 后未 reload,读
 - Do not claim completion after a mutation until readback / DRC verifies it (or state the remaining risk).
 - No undo — record before/after into the audit log so a move can be reversed by re-applying the old coordinates.
 - Treat `File`/`Blob` outputs (gerber/pick-and-place/3D) as artifacts.
+
+### Windows PowerShell JSON 补丁（#192）
+
+`pcb modify --id <pid> --patch-file patch.json` 从 UTF-8 文件读取 JSON 对象，支持 UTF-8 BOM，
+绕过 PowerShell 5.1 传递原生程序参数时剥离 JSON 引号的问题。`--patch-file` 与 `--patch` 互斥。
+PowerShell 可用 `'{"rotation":90}' | Set-Content -Encoding UTF8 patch.json` 创建补丁文件；
+不要使用默认输出 UTF-16 的 `Out-File`。
+原理图的显式 `--x/--y/--rotation/--designator` 仍覆盖文件中的同名键；
+PCB 的 `--center` 仍不允许补丁包含 x/y/rotation。
