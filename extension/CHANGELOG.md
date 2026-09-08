@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Let an exact `--doc` UUID use matching live document/result context without depending on the PCB name catalogue. Reject inconsistent project, document or type evidence.
+
 - Recover an active PCB missing from document enumeration using official current-PCB information, requiring matching project/document identity before accepting the name (#190).
 - Accept action request bodies up to 32 MiB for base64 3D model imports (#199); test the exact limit and one-byte overflow.
 

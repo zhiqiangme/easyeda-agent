@@ -51,3 +51,32 @@
 
 深入修复后的 `go test ./...`、文档恢复/补丁文件 `-race` 测试、`make lint-test`、
 `make skill-check` 均通过。Windows PowerShell 5.1 仍待 Windows CI，未以交叉编译替代实测。
+
+## ceshi 定点实测（17:14–17:30，UTC+8）
+
+环境：Chrome 网页版 EasyEDA 3.2.186，ceshi 连接器 1.4.2，开发态 CLI/daemon。
+这是针对故障的定点探测，不是 ESP32 客户需求到四层 PCB 的端到端验收。
+
+1. 初始 `doc ls` 返回 null、Board 列表为空。**后来证据证明不能据此称工程为空**：
+   `createPcb()` 返回 `d77b816f0ea2a04b`，可打开为 PCB3，但总表、当前 PCB 和
+   getPcbInfo 都不可读。`board create --pcb` 返回 Board1，Board 总表仍为空。
+2. 第一版“当前 PCB 元数据补读”在该状态下正确拒绝，但不能恢复。补充精确 UUID
+   路径：document.current 的结果与响应 context 的 UUID、项目和类型一致才通过。
+   实机使用 `--doc d77b816f0ea2a04b` 的读取探针成功执行，名称枚举不可用时仍能定位。
+3. 同一探针中 `sameDocument:true`，getAll 无参数/undefined/Top/Bottom/ID 枚举
+   全为 0，首尾无变化。没有非空图元证据，所以**尚未复现 #200 的“有器件却空读”**。
+4. 测试电阻创建失败：`Cannot convert undefined or null to object`；
+   测试丝印创建也失败：`无法创建文本图元`。未成功创建用于连续移动的图元，
+   因而 #190/#192 的真实移动/文件补丁/保存重开验证均未完成。
+5. UI 曾显示 PCB3，随后在重载/工程入口打开时停留开始页、“暂无数据”或白屏，
+   连接器却继续上报旧活动 PCB。不能将连接器在线或活动 UUID 等同于文档数据加载就绪。
+6. **清理未确认完成**：删除本轮创建的 PCB 时宿主抛
+   `Cannot read properties of null (reading 'data')`；后续受项目身份前置检查保护的
+   Board 清理也在该错误处停止。未反复重发删除。宿主恢复后只核查/清理上述 PCB3 UUID
+   和本轮 create 返回的 Board1，不批量清空其他文档。
+
+原始本地响应：`/tmp/easyeda-issue-live-20260908/`（create-pcb / add-component / silk-add /
+probe / cleanup / cleanup-rest JSON）。当前宿主问题阻塞下，保留错误和清理待办，不宣称验收完成。
+
+补充修复的全量 `go test ./...`、文档守卫 `-race`、Skill lint / package check 全部通过。
+身份不一致测试覆盖文档 UUID、类型、项目；修复测试 fixture 的 health 路径后全量复跑通过。

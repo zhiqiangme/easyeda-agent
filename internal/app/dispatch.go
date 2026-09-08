@@ -622,6 +622,19 @@ func ensureActiveDoc(cfg *appConfig, window string) error {
 	if cfg.doc == "" {
 		return nil
 	}
+	// A live, exact UUID match needs no name enumeration. The host can render
+	// an active PCB while every DMT metadata lookup is empty (#190/#200).
+	// Require both reads inside document.current to agree; response context is
+	// collected after the handler and can reveal a tab switch during that read.
+	cur, currentErr := requestAction(cfg, "document.current", window, nil)
+	if currentErr == nil && cur.Context != nil &&
+		strField(cur.Result, "uuid") == cfg.doc && cur.Context.DocumentUUID == cfg.doc &&
+		cur.Context.ProjectUUID != "" &&
+		(strField(cur.Result, "documentType") == "pcb" || strField(cur.Result, "documentType") == "schematic") &&
+		strField(cur.Result, "documentType") == cur.Context.DocumentType &&
+		strField(cur.Result, "parentProjectUuid") == cur.Context.ProjectUUID {
+		return nil
+	}
 	docs, activeUUID, rw, err := discoverDocs(cfg, window)
 	if err != nil {
 		return fmt.Errorf("--doc guard: %w", err)

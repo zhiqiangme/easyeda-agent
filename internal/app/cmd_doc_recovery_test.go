@@ -43,6 +43,8 @@ func TestDocGuardRecoversMissingActivePCB(t *testing.T) {
 				switch req.Action {
 				case "document.current":
 					result["uuid"] = "pcb1"
+					result["documentType"] = "pcb"
+					result["parentProjectUuid"] = "project1"
 				case "schematic.pages.list":
 					result["pages"] = []any{}
 				case "pcb.documents.list":
@@ -68,8 +70,50 @@ func TestDocGuardRecoversMissingActivePCB(t *testing.T) {
 			if cfg.doc != tc.selector {
 				t.Fatal("discovery mutated the caller's target guard")
 			}
-			if len(calls) != 4 || calls[3] != "pcb.board.info" {
+			if tc.selector == "pcb1" {
+				if len(calls) != 1 || calls[0] != "document.current" {
+					t.Fatalf("UUID should use only live identity: %v", calls)
+				}
+			} else if len(calls) != 5 || calls[4] != "pcb.board.info" {
 				t.Fatalf("unexpected recovery calls: %v", calls)
+			}
+		})
+	}
+}
+
+func TestDocGuardLiveUUIDRequiresMatchingIdentity(t *testing.T) {
+	for _, field := range []string{"uuid", "documentType", "parentProjectUuid"} {
+		t.Run(field, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/health" {
+					_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[{"windowId":"w1"}]}`))
+					return
+				}
+				var req struct {
+					Action string `json:"action"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Error(err)
+					return
+				}
+				result := map[string]any{}
+				ctx := map[string]any{"documentUuid": "pcb1", "documentType": "pcb", "projectUuid": "project1"}
+				switch req.Action {
+				case "document.current":
+					result = map[string]any{"uuid": "pcb1", "documentType": "pcb", "parentProjectUuid": "project1"}
+					result[field] = "mismatch"
+				case "schematic.pages.list", "pcb.documents.list", "pcb.board.info":
+					// Metadata is unavailable, so it cannot authorize a fallback.
+				default:
+					t.Errorf("unexpected action %s", req.Action)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result, "context": ctx})
+			}))
+			defer srv.Close()
+			host, port, _ := strings.Cut(strings.TrimPrefix(srv.URL, "http://"), ":")
+			cfg := &appConfig{host: host, ports: port + "-" + port, doc: "pcb1"}
+			if err := ensureActiveDoc(cfg, "w1"); err == nil {
+				t.Fatal("inconsistent live identity accepted")
 			}
 		})
 	}
