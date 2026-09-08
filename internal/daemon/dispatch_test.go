@@ -1,14 +1,14 @@
 package daemon
 
 import (
-	"testing"
-	"time"
-
 	"encoding/json"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"testing"
+	"time"
+
+	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
 )
 
 func TestRequestTimeout(t *testing.T) {
@@ -30,6 +30,41 @@ func TestRequestTimeout(t *testing.T) {
 				t.Fatalf("requestTimeout(%d) = %v, want %v", tc.timeoutMs, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestActionRequestAllowsLarge3DModelPayload(t *testing.T) {
+	// system.health is daemon-local, so this isolates the shared request decoder
+	// without needing a live connector to consume the model payload.
+	s := New(Options{})
+	body := `{"action":"system.health","payload":{"dataBase64":"` + strings.Repeat("A", 2<<20) + `"}}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/action", strings.NewReader(body))
+
+	s.handleAction(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("2 MiB base64 action payload rejected: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestActionRequestBodyLimitBoundary(t *testing.T) {
+	const prefix = `{"action":"system.health","payload":{"dataBase64":"`
+	const suffix = `"}}`
+	for _, extra := range []int{0, 1} {
+		body := prefix + strings.Repeat("A", actionRequestBodyLimit-len(prefix)-len(suffix)+extra) + suffix
+		rec := httptest.NewRecorder()
+		s := New(Options{})
+		s.handleAction(rec, httptest.NewRequest(http.MethodPost, "/action", strings.NewReader(body)))
+		if extra == 0 {
+			if rec.Code != http.StatusOK {
+				t.Fatalf("exact limit rejected: %d %s", rec.Code, rec.Body.String())
+			}
+		} else {
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "http: request body too large") {
+				t.Fatalf("oversize not rejected at ingress: %d %s", rec.Code, rec.Body.String())
+			}
+		}
 	}
 }
 
