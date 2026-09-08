@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Add `sch modify --patch-file` and `pcb modify --patch-file` for PowerShell 5.1 JSON quoting failures (#192). Accept UTF-8 BOM files, reject conflicting inline/file sources and non-object JSON before dispatch, and preserve explicit schematic flag overrides and PCB center guards.
+- Document native net-label API compatibility limits and readback requirements (#191).
+
+### Validation
+
+- Add command-level patch-file regression tests and a Windows PowerShell 5.1 native executable test to the cross-platform CI job. The PowerShell test is skipped on non-Windows hosts; a skip is not a Windows pass.
+
 ## [1.4.3] — 2026-09-08
 
 ### Added

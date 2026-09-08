@@ -61,6 +61,8 @@ jobs:
           python-version: '3.12'
       - name: Verify native download, version check and temporary replacement
         run: go test ./internal/selfupdate -run '^TestNativeDownloadedBinaryVerificationAndReplacement$' -count=1 -v
+      - name: Verify component patch files and legacy PowerShell argument passing
+        run: go test ./internal/app -run '^TestModifyPatch' -count=1 -v
       - name: Build and smoke a native CLI outside the checkout
         shell: bash
         run: |

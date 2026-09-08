@@ -620,6 +620,7 @@ come back in result.propertiesPreserved (+propertiesBefore), and any key the
 platform still dropped is reported in result.notApplied (non-zero exit).`,
 			Example: `  easyeda sch modify --id <primitiveId> --x 150 --y 200
   easyeda sch modify --id <id> --rotation 90 --designator R12
+  easyeda sch modify --id <id> --patch-file patch.json    # PowerShell-safe UTF-8 JSON
   easyeda sch modify --id <id> --patch '{"customAttributes":{"Value":"10k"}}'`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if id == "" {

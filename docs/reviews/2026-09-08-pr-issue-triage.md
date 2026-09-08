@@ -13,3 +13,20 @@
 | [#43](https://github.com/zhoushoujianwork/easyeda-agent/issues/43) | 芯片级 N8R8 实机验收；历史 R2 评论已纠正 `pcb check` 假绿，记录了 2 条短路，不能按曾有 0 ERROR 数字关闭。 | 专门运行真实编辑器整板回归，解决短路、RF / 高速约束后再验收；本轮未执行。 |
 
 本轮仅修改 CLI 文件输入与 Skill 说明，未改连接器、布局判据或 autosave；离线测试不代表整板端到端验收。
+
+## 补充验证与提交
+
+修复提交：`6c70816`。后续补齐 Unreleased changelog、两个命令的文件输入示例、
+文件缺失/显式零值覆盖/PCB center 冲突/空 inline 与文件互斥的命令级测试。
+
+- `TestModifyPatchFile`：16 个用例通过。
+- `TestModifyPatchFileBoundaries`：7 个边界用例通过；拒绝路径均确认没有派发动作。
+- `TestBuildModifyPatch`：9 个已有合并语义用例通过。
+- `go test ./...`：全量通过（Windows 专属测试在 macOS 跳过）。
+- `make lint-test`、`make skill-check`：通过。
+- Windows amd64 测试程序交叉编译：通过；不代表 Windows 运行通过。
+- `TestModifyPatchWindowsPowerShell51`：本机 macOS 无 PowerShell 5.1，明确跳过。
+  已接入 CI native-release-smoke；Windows runner 将通过 Set-Content 生成 BOM JSON，
+  再实际调用 powershell.exe → easyeda.exe → 模拟 daemon 验证补丁。该 CI 尚未运行。
+
+本次不升级版本、不发布；保留未完成的宿主复现及整板验收事项。
