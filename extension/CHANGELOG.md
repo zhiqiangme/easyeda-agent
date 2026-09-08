@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Pass the officially resolved split-screen ID when opening documents, avoiding PCB reopen hangs observed after closing a tab on EasyEDA 3.2.186; do not report ready when the active document is still different.
+
 - Keep PCB document and board metadata readable after mutations so `doc reload` can recover stale primitive reads; metadata reads do not clear the stale-read gate.
 
 - Fix PCB silk text creation: use registered `default` font and legal LEFT_TOP alignment in free text, net names and pad labels; empty font / alignment 0 was rejected by EasyEDA 3.2.186.

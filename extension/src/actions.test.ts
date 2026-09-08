@@ -28,6 +28,90 @@ import {
 	summarizeActivePageConnectivity,
 } from './actions';
 
+// ─── document.open: keep navigation on a known editor split ──────────────
+
+function installDocumentOpenStub(t: { after: (fn: () => void) => void }, options: {
+	split?: string;
+	splitFails?: boolean;
+	beforeTabId?: string;
+	afterUuid?: string;
+	afterReadFails?: boolean;
+} = {}) {
+	const globals = globalThis as any;
+	const previousEda = globals.eda;
+	const previousTypes = globals.EDMT_EditorDocumentType;
+	t.after(() => {
+		if (previousEda === undefined) delete globals.eda;
+		else globals.eda = previousEda;
+		if (previousTypes === undefined) delete globals.EDMT_EditorDocumentType;
+		else globals.EDMT_EditorDocumentType = previousTypes;
+	});
+	globals.EDMT_EditorDocumentType = { HOME: -1, BLANK: 0, SCHEMATIC_PAGE: 1, PCB: 3 };
+	const opens: string[][] = [];
+	const splitReads: string[] = [];
+	let opened = false;
+	globals.eda = {
+		dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: 'project-1' }) },
+		dmt_SelectControl: {
+			getCurrentDocumentInfo: async () => {
+				if (opened && options.afterReadFails) throw new Error('identity unavailable');
+				return opened
+					? { uuid: options.afterUuid ?? 'pcb-target', tabId: 'tab-target', documentType: 3 }
+					: { uuid: 'old-page', tabId: options.beforeTabId ?? 'tab-old', documentType: 1 };
+			},
+		},
+		dmt_EditorControl: {
+			getSplitScreenIdByTabId: async (tabId: string) => {
+				splitReads.push(tabId);
+				if (options.splitFails) throw new Error('split metadata unavailable');
+				return options.split;
+			},
+			openDocument: async (...args: string[]) => {
+				opens.push(args);
+				opened = true;
+				return 'tab-target';
+			},
+		},
+	};
+	return { opens, splitReads };
+}
+
+test('document.open uses the active tab\'s official split ID without guessing', async (t) => {
+	const fx = installDocumentOpenStub(t, { split: 'official-split-42' });
+	const res: any = await runAction('document.open', { uuid: 'pcb-target' });
+	assert.deepEqual(fx.splitReads, ['tab-old']);
+	assert.deepEqual(fx.opens, [['pcb-target', 'official-split-42']]);
+	assert.deepEqual(res.result, { tabId: 'tab-target', ready: true });
+});
+
+for (const [name, options] of Object.entries({
+	'unavailable split API': { splitFails: true },
+	'missing split ID': {},
+	'blank split ID': { split: '  ' },
+	'blank active tab ID': { beforeTabId: '', split: 'unusable-split' },
+})) {
+	test(`document.open preserves single-argument fallback for ${name}`, async (t) => {
+		const fx = installDocumentOpenStub(t, options);
+		const res: any = await runAction('document.open', { uuid: 'pcb-target' });
+		assert.deepEqual(fx.opens, [['pcb-target']], 'fallback must not invent or pass an empty destination');
+		assert.equal(res.result.ready, true);
+		if (name === 'blank active tab ID') assert.deepEqual(fx.splitReads, []);
+	});
+}
+
+test('document.open does not report ready when the SDK returns a tab but the old page remains active', async (t) => {
+	const fx = installDocumentOpenStub(t, { split: 'official-split-42', afterUuid: 'old-page' });
+	const res: any = await runAction('document.open', { uuid: 'pcb-target' });
+	assert.equal(res.result.ready, false);
+	assert.equal(fx.opens.length, 1, 'an identity mismatch must not trigger a second navigation');
+});
+
+test('document.open does not report ready when activation cannot be read back', async (t) => {
+	installDocumentOpenStub(t, { split: 'official-split-42', afterReadFails: true });
+	const res: any = await runAction('document.open', { uuid: 'pcb-target' });
+	assert.equal(res.result.ready, false);
+});
+
 // ─── Library asset authoring: footprint + symbol + Device ────────────────
 
 test('library footprint create defaults to personal library and verifies by get', async () => {

@@ -6678,9 +6678,25 @@ export const schematicPinDisconnect: Handler = async (payload) => {
  */
 const documentOpen: Handler = async (payload) => {
 	const uuid = requireString(payload, 'uuid');
+	// After closing a tab, the host's implicit destination can be stale even
+	// though a remaining tab is active. Resolve its split through the official
+	// API; older hosts without this metadata keep the original open path.
+	let splitScreenId: string | undefined;
+	try {
+		const current = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+		if (typeof current?.tabId === 'string' && current.tabId.trim()) {
+			const split = await eda.dmt_EditorControl.getSplitScreenIdByTabId(current.tabId);
+			if (typeof split === 'string' && split.trim()) {
+				splitScreenId = split;
+			}
+		}
+	}
+	catch { /* split metadata is optional; never guess a destination ID */ }
 	let tabId;
 	try {
-		tabId = await eda.dmt_EditorControl.openDocument(uuid);
+		tabId = splitScreenId === undefined
+			? await eda.dmt_EditorControl.openDocument(uuid)
+			: await eda.dmt_EditorControl.openDocument(uuid, splitScreenId);
 	}
 	catch (err) {
 		throw edaError(err, 'Failed to open document.');
@@ -6688,19 +6704,21 @@ const documentOpen: Handler = async (payload) => {
 	if (tabId === undefined) {
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Failed to open document "${uuid}".`);
 	}
-	// openDocument returns before the document finishes loading. For schematic
-	// pages, wait for the primitive data to settle so a read fired right after
-	// isn't empty/stale (#67). A PCB has no components.list to poll, so we skip
-	// the wait and report ready:true optimistically.
-	let ready = true;
+	// A returned tab ID does not prove the target is active. Confirm identity
+	// before declaring readiness; schematic pages additionally retain their
+	// primitive-settle check (#67). For PCB this only confirms activation, not
+	// that every primitive has loaded (the CLI's doc switch polls PCB data).
+	let ready = false;
 	try {
 		const doc = await eda.dmt_SelectControl.getCurrentDocumentInfo();
-		if (doc && documentTypeLabel(doc.documentType) === 'schematic') {
-			ready = await waitSchematicPageSettle();
+		if (doc?.uuid === uuid) {
+			ready = documentTypeLabel(doc.documentType) === 'schematic'
+				? await waitSchematicPageSettle()
+				: true;
 		}
 	}
 	catch {
-		/* type probe is best-effort — leave ready:true */
+		/* An unavailable identity probe cannot establish readiness. */
 	}
 	return { result: { tabId, ready } };
 };

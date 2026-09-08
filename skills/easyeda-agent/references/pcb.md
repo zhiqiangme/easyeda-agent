@@ -53,6 +53,9 @@ missing **and** the user explicitly accepts a debug path.
 
 - `pcb.documents.list` — all PCB documents in the project (uuid + name); pair with `document.open`.
 - `document.open` — open any document (schematic page or PCB) by uuid; the cross-type switch entry.
+  打开前通过当前 tab 查询官方分屏 ID，存在时显式传给宿主，避免关闭 PCB 后默认分屏
+  定位挂起；查不到时保留宿主默认行为，不猜 ID。返回 `ready:true` 至少要求当前 UUID
+  与目标一致；PCB 身份确认不代表器件数据已完成加载，后续仍需读取验证。
 - `pcb.board.info` — current Board (schematic↔PCB linkage) + current PCB; the prerequisite context for `import_changes`.
 
 ### Board (板子/组合 — the schematic↔PCB binding)
