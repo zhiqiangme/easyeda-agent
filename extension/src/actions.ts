@@ -6257,7 +6257,9 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 	// rotation negation (see detectRotationNegation). Verify rendered orientation if
 	// in doubt — the negation is connector-build-dependent.
 	const rotation = optionalNumber(payload, 'rotation') ?? rotationFor(kind, direction);
-	const applied = await appliedRotation(rotation);
+	// Native labels accept only (x, y, net). Do not make label creation depend on
+	// an unrelated power-flag calibration, which can itself hang on the host (#191).
+	const applied = kind === NET_LABEL_KIND ? rotation : await appliedRotation(rotation);
 
 	// `--direction` is the VISUAL outward direction. The schematic canvas is
 	// y-UP (+y renders upward), so 'up' increases y and 'down' decreases it.

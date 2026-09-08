@@ -160,3 +160,35 @@ count=0。测试丝印此前已清理；本轮新 ceshi 清理完成。旧 UUID 
 成功，检查新 eext 的 dist/index.js 包含分屏解析逻辑。本轮未改 Go，无需重复前轮已通过
 的全量 Go 测试。新插件包尚未导入正在运行的连接器，实机验证通过的是编译后的完整
 handler；普通 CLI 要长期使用此修复，需导入新包并重新加载编辑器。
+
+## 热加载部署与普通 CLI 回归完成（23:49–23:57）
+
+使用仓库既有 hot-reload-server.mjs / hot-reload-inject.js，通过 debug.exec_js
+把新 dist/index.js 写入当前内置浏览器的插件 IndexedDB 并重新加载。新窗口重新连接。
+最终存储与本地 bundle 的 SHA-256 一致：
+`ec7abb2ed4b235abd53800cd288c8d945293ca3306f4c1cfe97d5c14683d5905`，613396 字节。
+本节替代上一节“插件尚未安装”的当前状态：修复代码已在当前浏览器运行。
+
+- 普通 CLI silk-add 成功；doc reload 完整保存、关闭、重开成功，无临时 handler。
+- 普通 CLI add-component（省略 rotation）成功，随后读取位号、uniqueId 正确。
+- 按 `--doc PCB1` 连续执行 BOM patch-file 和无 BOM patch-file，分别改到
+  (1100,1050) 和 (1150,1120)。每次标准 doc reload 后的 typed list 坐标均断言通过。
+- 删除本轮测试电阻与丝印、保存重开后，PCB 器件数为 0。
+- 新建隔离原理图页 `57424b52f4abaeb2`，一根真实短线连接测试坐标。仅调用一次
+  createNetLabel(605,1185,"ISSUE191_PROBE")，7090ms 时原生 Promise 仍 pending；
+  之后回读 Attribute=[]、导线 net=""。因此 #191 原生问题在当前 3.2.186 仍复现。
+  测试页已删除，文档目录确认仅保留原 P1 与 PCB1。
+- 修复 connect_pin(net_label) 不需要却仍执行的旋转校准探针；回归在旧代码下捕获
+  多余 Power/__ROTPROBE__ 创建，修复后仅走 stub 与原生 label。该修复不等于宿主
+  createNetLabel 已可用。最新代码已再次热加载，最终队列 abandoned=0。
+
+#201 已修复两处 DSH URL.pathname：改用 Node fileURLToPath。Mac Node 22.22.0
+及最低 20.17.0 各 7 项测试通过，包含真实 Node Windows 转换模式下的盘符、UNC、
+中文、空格、#/%；真实 DSH loader 解析 YAML、启动 stdio MCP、枚举 11 工具、离线调用
+和 Skill 读取通过。Windows 原生 runner 尚未执行，不把 Mac 的跨平台输入测试称为
+Windows DSH 真机验收。CI 已接入，未推送触发。
+
+连接器全量 280 项测试、TypeScript typecheck、Skill package check 和插件构建通过。
+本轮没有改 Go 实现，沿用此前全量 Go 通过结果。#190 的当前环境普通 CLI 回归已完成，
+#192 的跨平台文件功能已实测，PowerShell 5.1 原生命令解析仍待对应环境。
+#200 旧版宿主复现、#173 编组、#43 完整整板验收及 #199 真实 3D 导入仍未完成。

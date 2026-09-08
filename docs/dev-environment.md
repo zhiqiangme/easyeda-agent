@@ -188,6 +188,15 @@ The inject script writes the IndexedDB records described above; the server reads
 `connectorVersion` in `daemon health` is compiled into `index.js`
 (`CONNECTOR_VERSION`), so a changed value is proof the new bundle is running.
 
+For a same-version development build, `make connector` is sufficient; do not
+infer loaded code from the version alone. Compare the stored bundle hash with
+`extension/dist/index.js`, confirm a new window ID / connectedAt after reload,
+and run the changed action through the ordinary CLI. The inject script also
+works via `easyeda --project ceshi debug exec` in the in-app browser (verified
+2026-09-08): this avoids browser-control timeouts and manual reinstall. Save
+open schematic and PCB documents first. Prefer this committed workflow before
+asking the user to uninstall/import the connector.
+
 ### Minimal WS protocol (if you build your own transport)
 
 Server is request/response over a JSON WebSocket:

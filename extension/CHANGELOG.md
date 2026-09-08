@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Skip rotation calibration when connecting a native schematic net label, which has no rotation parameter. The host's EDA v4 label API remains pending on the tested 3.2.186 host; this does not claim native-label compatibility is fixed (#191).
+- Resolve DSH MCP and Skill file URLs with Node's `fileURLToPath`, preserving Windows drive/UNC paths and escaped characters (#201); add cross-platform path and native-launch CI tests.
+
 - Pass the officially resolved split-screen ID when opening documents, avoiding PCB reopen hangs observed after closing a tab on EasyEDA 3.2.186; do not report ready when the active document is still different.
 
 - Keep PCB document and board metadata readable after mutations so `doc reload` can recover stale primitive reads; metadata reads do not clear the stale-read gate.

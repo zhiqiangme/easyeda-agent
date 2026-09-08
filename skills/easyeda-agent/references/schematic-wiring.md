@@ -17,6 +17,12 @@ pin coords, existing flag/port/label bboxes, title-block keep-out), scores every
 kind-default bonuses), picks the lowest-cost one, and delegates the mutation to
 `connect_pin`. Same schematic state + spec → same selection (deterministic).
 
+`sch connect --kind net_label` 使用原生 `createNetLabel(x, y, net)`；方向和偏移只决定
+桩线端点，该接口不接收旋转参数，因此不会创建 `__ROTPROBE__` 旋转校准旗。
+电源、地和 netport 仍按原流程校准旋转。跳过无用探针不代表宿主已支持原生标签；
+接口标注 EDA v4 起提供，超时后须先回读属性图元和实际网络，不能盲重试。
+兼容性与验证说明见 [schematic.md](schematic.md#原生-net_label-超时191)。
+
 **批次内互斥 (issue #138):** 同一批(--spec / 多 --pin)里**已规划的短桩会当作
 既存导线注册回 scene**,后续连接对它做同样的异网硬拒——同器件相邻异网引脚
 (隔离 DC-DC 的 B0512S 类四域脚)不再出现短桩共线相触被 EasyEDA 合并成隐性

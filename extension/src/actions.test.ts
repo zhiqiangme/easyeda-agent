@@ -311,6 +311,50 @@ test('connect_pin endpoint contract is y-UP and matches Go autoconnect', () => {
 	assert.deepEqual(connectPinEndpoint(545, 290, 18, 'down'), { x: 545, y: 270 });
 });
 
+test('connect_pin net_label creates only its stub and native attribute without rotation calibration', async (t) => {
+	const globals = globalThis as any;
+	const previousEda = globals.eda;
+	t.after(() => {
+		if (previousEda === undefined) delete globals.eda;
+		else globals.eda = previousEda;
+	});
+	const calls: Array<unknown[]> = [];
+	globals.eda = {
+		sch_PrimitiveComponent: {
+			createNetFlag: async (...args: unknown[]) => {
+				calls.push(['unexpected rotation probe', ...args]);
+				throw new Error('native labels must not depend on power-flag creation');
+			},
+			getAll: async () => { calls.push(['unexpected calibration read']); return []; },
+			delete: async () => { calls.push(['unexpected calibration cleanup']); return true; },
+		},
+		sch_PrimitiveWire: {
+			create: async (...args: unknown[]) => {
+				calls.push(['wire', ...args]);
+				return { getState_PrimitiveId: () => 'stub-1' };
+			},
+		},
+		sch_PrimitiveAttribute: {
+			createNetLabel: async (...args: unknown[]) => {
+				calls.push(['label', ...args]);
+				return { getState_PrimitiveId: () => 'label-1' };
+			},
+		},
+	};
+
+	const result: any = await runAction('schematic.power.connect_pin', {
+		kind: 'net_label', net: 'ISSUE191_SIGNAL', pinX: 545, pinY: 290,
+		direction: 'up', offset: 18, rotation: 90,
+	});
+	assert.deepEqual(calls, [
+		['wire', [545, 290, 545, 310]],
+		['label', 545, 310, 'ISSUE191_SIGNAL'],
+	], 'label coordinates follow the snapped stub endpoint; rotation is not an SDK argument');
+	assert.equal(result.result.wirePrimitiveId, 'stub-1');
+	assert.equal(result.result.flagPrimitiveId, 'label-1');
+	assert.deepEqual(result.result.endPoint, { x: 545, y: 310 });
+});
+
 /** A minimal mock of eda.sch_PrimitiveComponent exposing only the getters
  *  serializeComponent reads. Casts through unknown since the real type is huge. */
 function mockComponent(overrides: Record<string, unknown> = {}): any {
