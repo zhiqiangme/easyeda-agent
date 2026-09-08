@@ -197,7 +197,7 @@ codex mcp add easyeda-agent \
 
 ## 效果演示
 
-### 宏恩门禁：本地数据 → SCH Apply → 真实原理图
+### 门禁控制板示例：本地数据 → SCH Apply → 真实原理图
 
 器件、完整物理引脚、稳定网络 ID 和 NC 保存在本地连接图中。Agent 先依据实测引脚几何
 计算功能 Lib 内的器件位置、方向和连线，再组合页面，通过 `sch apply` 顺序写入
@@ -207,23 +207,23 @@ EasyEDA，并回读核对。原位号与器件身份保持不变。
 
 #### 电源与 RF 主控
 
-![宏恩门禁电源与 RF 主控页：外围电路按引脚方向连接，粉色虚线框标识功能模块](docs/images/hongen-power-rf.png)
+![门禁控制板示例的电源与 RF 主控页：外围电路按引脚方向连接，粉色虚线框标识功能模块](docs/images/access-control-power-rf.png)
 
 电源、RF 主控和下载接口分别组成 Lib；外围电路按引脚方向连接，端口长短错落，
 粉色虚线框与 0.2 inch 标题由数据计算。
 
 #### 对讲与外设接口
 
-![宏恩门禁对讲与外设接口页：功能模块按 Z 字阅读顺序排列，各框随内容独立收紧](docs/images/hongen-talk-interfaces.png)
+![门禁控制板示例的对讲与外设接口页：功能模块按 Z 字阅读顺序排列，各框随内容独立收紧](docs/images/access-control-talk-interfaces.png)
 
 从左上角按 Z 字阅读顺序排列，每框随内容独立收紧并保留最小内边距；同行顶齐，
 下一行按本行最大高度推进。标题利用上方或下方空档，减少额外高度。
 
 #### Apply 实际执行
 
-![宏恩原理图的实际 Apply 阶段捕捉，加速播放](docs/assets/hongen-sch-apply.gif)
+![门禁控制板示例的实际 Apply 阶段捕捉，加速播放](docs/assets/access-control-sch-apply.gif)
 
-动图使用电源与 RF 主控页实际 Apply 捕捉的 12 张关键阶段导图，加速播放；两张静图为 EasyEDA 官方导图。
+动图使用电源与 RF 主控页实际 Apply 捕捉的 12 张关键阶段导图，加速播放；两张静图源自 EasyEDA 官方导图，展示名称已匿名化。
 录制脚本与复现步骤见 [Apply 动图捕捉](docs/schematic-showcase.md)。
 两页布局与连接检查均为 0 错误、0 警告；官方 DRC 仍有 3 WARN，严格门禁未通过，部分文字避让仍待完善。
 完整验证范围见 [1.4 发布与验证](docs/release-1.4.md)。
@@ -250,7 +250,7 @@ EasyEDA，并回读核对。原位号与器件身份保持不变。
 |---|---|
 | <img src="docs/assets/demo-outline-before.png" width="330" alt="前:板框过大"/> → <img src="docs/assets/demo-outline-after.png" width="330" alt="后:板框贴合器件"/> | <img src="docs/assets/demo-silk-before.png" width="330" alt="前:位号散乱重叠"/> → 对齐后见上方成品板 |
 
-> 本节 PCB GIF 和截图来自 ESP32 回归板真机流程(原理图 → 导入 PCB → 4 层叠层 → 布局 → GND 内电层/VCC 信号 plane → 天线禁区+检查 → 丝印/LED 极性 → 挖槽)。这是独立于宏恩原理图的历史回归案例，原始需求见 [esp32MiniRequire.md](esp32MiniRequire.md)。
+> 本节 PCB GIF 和截图来自 ESP32 回归板真机流程(原理图 → 导入 PCB → 4 层叠层 → 布局 → GND 内电层/VCC 信号 plane → 天线禁区+检查 → 丝印/LED 极性 → 挖槽)。这是独立于门禁控制板示例的历史回归案例，原始需求见 [esp32MiniRequire.md](esp32MiniRequire.md)。
 
 ## 能力清单(已支持)
 

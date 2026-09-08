@@ -203,7 +203,7 @@ for the tool inventory and development checks.
 
 ## Showcase
 
-### Hongen access control: local data → SCH Apply → a real schematic
+### Access control example: local data → SCH Apply → a real schematic
 
 Components, physical pins, stable net IDs, and NC states live in a local
 connectivity graph. The agent calculates component positions, orientations,
@@ -215,7 +215,7 @@ designators and component identities stay intact.
 
 #### Power and RF controller
 
-![Hongen power and RF controller sheet, with pin-oriented peripheral wiring and pink dashed functional frames](docs/images/hongen-power-rf.png)
+![Access control example: power and RF controller sheet, with pin-oriented peripheral wiring and pink dashed functional frames](docs/images/access-control-power-rf.png)
 
 Power, the RF controller, and the programming interface each form a Lib.
 Peripheral wiring follows pin directions, terminal wires use staggered lengths,
@@ -223,7 +223,7 @@ and pink dashed frames with 0.2 inch titles are calculated from the data.
 
 #### Talk controller and peripheral interfaces
 
-![Hongen talk and interface sheet, with compact functional frames in Z-order reading sequence](docs/images/hongen-talk-interfaces.png)
+![Access control example: talk and interface sheet, with compact functional frames in Z-order reading sequence](docs/images/access-control-talk-interfaces.png)
 
 Libs follow a Z-order reading sequence from the top left. Each frame fits its own
 contents with a minimum inset; frames align at the top of each row, and the next
@@ -232,10 +232,10 @@ the circuit to reduce height.
 
 #### SCH Apply in action
 
-![Actual Hongen SCH Apply stages, captured and played back at an accelerated pace](docs/assets/hongen-sch-apply.gif)
+![Actual SCH Apply stages for the access control example, captured and played back at an accelerated pace](docs/assets/access-control-sch-apply.gif)
 
 The animation uses 12 official exports captured during the power and RF controller
-sheet's actual Apply, played back at an accelerated pace. Both still images are official EasyEDA exports.
+sheet's actual Apply, played back at an accelerated pace. Both still images come from official EasyEDA exports, with the displayed project name anonymized.
 See [Apply capture instructions](docs/schematic-showcase.md) for the script and reproduction steps.
 Both sheets passed local layout and connectivity checks with zero errors and
 warnings. Official DRC still reports 3 warnings, so the strict gate did not pass;

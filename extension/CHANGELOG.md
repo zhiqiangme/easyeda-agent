@@ -20,7 +20,7 @@
 ### Validation and limits
 
 - Add reusable release-asset and isolated CLI smoke checks, Bash installer failure regression tests, and native Ubuntu/macOS/Windows CI checks including real download, execution and replacement of a temporary binary. Only macOS execution has been verified locally; this does not constitute a complete EDA acceptance run.
-- Hongen live Apply/readback preserved 23 components and 165 physical pins while adding 12 reviewed connections and clearing four incorrect NC states. Local layout/check/bridge gates report zero errors and warnings; official DRC remains at 3 WARN, so strict acceptance is not claimed.
+- The access control example's live Apply/readback preserved 23 components and 165 physical pins while adding 12 reviewed connections and clearing four incorrect NC states. Local layout/check/bridge gates report zero errors and warnings; official DRC remains at 3 WARN, so strict acceptance is not claimed.
 - HostLink, PTT, RF LED and the conflicting TALK GPIO4 responsibility remain unresolved. The full `esp32MiniRequire.md` requirement-to-four-layer-PCB regression was not rerun for this maintenance release.
 
 ## [1.4.2] — 2026-09-06
@@ -42,7 +42,7 @@
 
 ### Validation and limits
 
-- The two-page Hongen conversion and separate designator repair were verified against live readback; the final designator repair preserved all 23 components, 165 pins, 84 connections and 81 NC states. Official DRC still reports 15 existing network warnings; this is not a completed electrical-design or PCB acceptance test.
+- The two-page access control example's conversion and separate designator repair were verified against live readback; the final designator repair preserved all 23 components, 165 pins, 84 connections and 81 NC states. Official DRC still reports 15 existing network warnings; this is not a completed electrical-design or PCB acceptance test.
 - Composition consumes supplied circuit data and geometry. It does not invent peripheral circuits, automatically split/create pages, rotate/scale symbols, or generate standalone Notes. Existing strict gates remain in force.
 
 ## [1.3.0] — 2026-09-01

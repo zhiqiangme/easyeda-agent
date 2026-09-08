@@ -51,7 +51,7 @@ make release-build VERSION=v1.4.3
 tag 或上传资产。正式发布由 `make release VERSION=v1.4.3` 完成；GitHub Release 发出后
 触发 SkillHub CI，ClawHub 发布为 best-effort。
 
-## 宏恩工程现场验证
+## 门禁控制板示例现场验证
 
 两页原理图的真实 Apply/回读验证保留了 23 个器件、165 个物理引脚、原始位号、库身份
 和稳定网络 ID。补入 RF/SD 8 条及 TALK I2S 4 条连接，解除 4 个错误 NC；最终本地数据为

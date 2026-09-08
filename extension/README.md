@@ -13,7 +13,7 @@ Skill / CLI -> Go daemon -> EDA Agent Connector -> 官方 eda.* API
 
 ## 效果演示
 
-### 宏恩门禁：本地数据 → SCH Apply → 真实原理图
+### 门禁控制板示例：本地数据 → SCH Apply → 真实原理图
 
 器件、物理引脚、稳定网络 ID 和 NC 保存在本地连接图中。Agent 依据实测引脚几何计算
 功能 Lib 内的器件位置、方向和连线，再组合页面，通过 `sch apply` 顺序写入 EasyEDA
@@ -21,17 +21,17 @@ Skill / CLI -> Go daemon -> EDA Agent Connector -> 官方 eda.* API
 
 **23 个器件 · 165 个物理引脚 · 28 个网络 · 2 页原理图**
 
-![宏恩门禁电源与 RF 主控页：外围电路按引脚方向连接，粉色虚线框标识功能模块](images/hongen-power-rf.png)
+![门禁控制板示例的电源与 RF 主控页：外围电路按引脚方向连接，粉色虚线框标识功能模块](images/access-control-power-rf.png)
 
 电源、RF 主控和下载接口分别组成 Lib；外围电路按引脚方向连接，端口长短错落。
 
-![宏恩门禁对讲与外设接口页：功能模块按 Z 字阅读顺序排列，各框随内容独立收紧](images/hongen-talk-interfaces.png)
+![门禁控制板示例的对讲与外设接口页：功能模块按 Z 字阅读顺序排列，各框随内容独立收紧](images/access-control-talk-interfaces.png)
 
 对讲与外设按 Z 字阅读顺序排列，每框随内容独立收紧并保留内边距，标题利用上方或下方空档。
 
-![宏恩原理图的实际 Apply 阶段捕捉，加速播放](images/hongen-sch-apply.gif)
+![门禁控制板示例的实际 Apply 阶段捕捉，加速播放](images/access-control-sch-apply.gif)
 
-动图使用电源与 RF 主控页实际 Apply 捕捉的 12 张关键阶段导图，加速播放；静图为 EasyEDA 官方导图。
+动图使用电源与 RF 主控页实际 Apply 捕捉的 12 张关键阶段导图，加速播放；静图源自 EasyEDA 官方导图，展示名称已匿名化。
 录制方法见 [Apply 动图捕捉](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/schematic-showcase.md)。
 两页布局与连接检查均为 0 错误、0 警告；官方 DRC 仍有 3 WARN，严格门禁未通过，部分文字避让仍待完善。
 验证范围见 [1.4 发布与验证](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/release-1.4.md)。
