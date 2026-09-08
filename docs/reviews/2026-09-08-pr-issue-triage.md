@@ -125,3 +125,14 @@ Go 热重载后连接器未自动连回，内置浏览器控制工具连续超�
 
 连接器 272 项测试、TypeScript typecheck、全量 go test、Skill lint/package check
 均通过；make connector 已生成本地 1.4.3 dev 包。尚未执行完整 ESP32 端到端回归。
+
+### 连接恢复后的移动验证（23:29–23:31）
+
+连接恢复后，typed list 读到两只已保存的测试电阻；第二只的 designator/uniqueId
+也正确持久化为 R_TEST2 / issue-probe-2。对第一只执行带 UTF-8 BOM 的 patch-file，
+经名称 `--doc PCB1` 定位后成功移动到 (1100,1050)，返回 verified=true。
+
+随后 doc reload 已通过修复后的文档定位、保存和关闭阶段，但宿主 document.open
+超时。回读目录确认 PCB1 仍存在，活动页为 P1；只恢复打开一次仍超时，未重复移动。
+现已停止自动重试，并请求手动双击 PCB1 作对照。两只测试器件尚待清理；不能声称
+本次移动已经通过重开后持久化验收，也不能把所有页面载入问题归于已修复的丝印参数。
