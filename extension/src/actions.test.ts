@@ -2677,3 +2677,25 @@ test('resolve_lcsc: batch cache retains distinct project-name fallbacks for the 
 	}
 	finally { delete (globalThis as any).eda; }
 });
+
+test('PCB silk creation supplies a registered font and legal top-left anchor', async () => {
+	let stored: unknown[] | undefined;
+	(globalThis as any).eda = {
+		pcb_PrimitiveString: {
+			create: async (...args: unknown[]) => {
+				// Model the native font validation that previously rejected empty strings.
+				assert.ok(['default', 'default2'].includes(String(args[4])));
+				assert.ok(Number(args[7]) >= 1 && Number(args[7]) <= 9);
+				stored = args;
+				return { getState_PrimitiveId: () => 'silk-regression' };
+			},
+		},
+		pcb_Primitive: { getPrimitivesBBox: async () => ({ minX: 100, minY: 160, maxX: 300, maxY: 200 }) },
+	};
+	try {
+		const res: any = await runAction('pcb.silk.add', { text: 'TEST', x: 100, y: 200 });
+		assert.equal(res.result.primitiveId, 'silk-regression');
+		assert.deepEqual(stored, [3, 100, 200, 'TEST', 'default', 40, 6, 1, 0, false, 0, false, false]);
+	}
+	finally { delete (globalThis as any).eda; }
+});

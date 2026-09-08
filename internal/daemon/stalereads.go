@@ -104,6 +104,10 @@ var staleViewOnlyActions = map[string]bool{
 // whole contract is that its message names a next step that works.
 var staleBlockExemptReads = map[string]bool{
 	"pcb.snapshot": true,
+	// Document identity/binding metadata does not enumerate cached primitives.
+	// Blocking discovery would deadlock the prescribed doc reload recovery.
+	"pcb.documents.list": true,
+	"pcb.board.info":     true,
 }
 
 // pcbStaleMarks reports whether a successful request should mark the window's

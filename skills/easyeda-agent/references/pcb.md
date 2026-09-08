@@ -78,6 +78,13 @@ Act on the focused canvas; the editor view shortcuts. CLI: `easyeda view …`.
 - `view.zoom` — pan/zoom to a center coordinate and/or scale percent (`--x/--y/--scale`; omitted keeps current).
 - `view.region` — zoom to a rectangular region (`--left/--right/--top/--bottom`, mil).
 
+### PCB 文本参数
+
+`silk-add`、`silk-netnames`、`silk-label-pads` 使用内置 `default` 字体和
+`LEFT_TOP`（1）对齐，坐标为文字左上锚点。官方文本 API 会拒绝空字体名；
+对齐值合法范围为 1–9，不能传 0。宿主常把这些参数错误统一包装成
+“无法创建文本图元”，这不等同于连接断开或 PCB 未加载。
+
 ### Read / inspect
 
 - `pcb.components.list` — placed footprints. `includeBBox` → per-component rendered extent (for overlap/spacing reasoning); via the CLI (`pcb list --include-bbox`) each bbox'd part also carries `center` `{x,y}` — the bbox geometric center, CLI-computed — use it (not the anchor `x`/`y`) when planning positions; `includePads` → pads + net (the net-by-name connectivity) + **real copper `width`/`height`** (mil, axis-aligned after pad rotation; omitted for complex-polygon pads → consumers fall back to a nominal size). Connector ≥0.12.1; check/route clearance math uses these real extents.
@@ -121,6 +128,8 @@ STALE_READ: pcb.components.list —— PCB 自 pcb.line.create 后未 reload,读
   确定性复位 = `rip-up → save → reload`。
 - **`pcb pour-rebuild` 也解锁**:它本来就是「铺铜连通性 stale」的修法。
   DRC 手术后同网(多为 GND)Connection Error 暴增,先跑它,那不是真断。
+- **文档定位不受阻断**：`pcb.documents.list` / `pcb.board.info` 只读文档身份和板绑定，
+  必须允许在写入后运行，否则 `doc reload` 无法定位目标。它们不会解除图元读取门禁。
 - **不会误伤的**:`pcb save`、`pcb pour-rebuild`、任何 `--dry-run` 预览(issue #112),
   以及只改视图的 `view-side` / `layers set-current` / `layers visibility`
   —— 这些不脏化枚举,不会 arm 这道门。

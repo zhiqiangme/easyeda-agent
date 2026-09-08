@@ -7442,8 +7442,8 @@ const pcbSilkAdd: Handler = async (payload) => {
 	let s;
 	try {
 		s = await eda.pcb_PrimitiveString.create(
-			layer, x, y, text, '', fontSize, lineWidth,
-			0 as unknown as EPCB_PrimitiveStringAlignMode, rotation, false, 0, false, false,
+			layer, x, y, text, 'default', fontSize, lineWidth,
+			1 as EPCB_PrimitiveStringAlignMode, rotation, false, 0, false, false,
 		);
 	}
 	catch (err) {
@@ -7741,22 +7741,22 @@ const pcbSilkNetnames: Handler = async (payload) => {
 				continue;
 			}
 
-			// Create silkscreen string — 13 params: layer, x, y, text, unknown, fontSize, lineWidth,
-			// alignMode, rotation, isDuplicate, spacing, isMirror, isVertical
+			// Native text requires a registered font and LEFT_TOP (1); the collision
+			// estimate extends right/down from this same anchor.
 			const created_prim = await eda.pcb_PrimitiveString.create(
 				layer as unknown as TPCB_LayersOfImage,
 				best.x,
 				best.y,
 				net.name,
-				'',
+				'default',
 				fontSize,
 				lineWidth,
-				0 as unknown as EPCB_PrimitiveStringAlignMode,
+				1 as EPCB_PrimitiveStringAlignMode,
 				0, // rotation
-				false, // isDuplicate
-				0, // spacing
+				false, // reverse
+				0, // expansion
 				false, // isMirror
-				false, // isVertical
+				false, // primitiveLock
 			);
 
 			if (!created_prim) {
@@ -7973,15 +7973,15 @@ const pcbSilkLabelPads: Handler = async (payload) => {
 					bestPos.x,
 					bestPos.y,
 					labelText,
-					'',
+					'default',
 					fontSize,
 					lineWidth,
-					0 as unknown as EPCB_PrimitiveStringAlignMode,
+					1 as EPCB_PrimitiveStringAlignMode,
 					0, // rotation
-					false, // isDuplicate
-					0, // spacing
+					false, // reverse
+					0, // expansion
 					false, // isMirror
-					false, // isVertical
+					false, // primitiveLock
 				);
 
 				if (!label) {

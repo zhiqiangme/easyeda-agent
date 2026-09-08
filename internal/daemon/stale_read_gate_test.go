@@ -416,3 +416,21 @@ func TestStaleReadRefusalIsTimestampFree(t *testing.T) {
 		t.Errorf("refusal text must be deterministic:\n%s\nvs\n%s", a, b)
 	}
 }
+
+func TestStaleReadGate_AllowsReloadDiscoveryWithoutUnlockingPrimitives(t *testing.T) {
+	s, _ := gateServer(t)
+	gateMark(s, "pcb.add_component", "w1", nil)
+	for _, a := range []string{"pcb.documents.list", "pcb.board.info"} {
+		if resp := s.checkStaleRead(gateReq(a, "w1", "ceshi")); resp != nil {
+			t.Fatalf("reload discovery %s blocked: %+v", a, resp)
+		}
+		gateMark(s, a, "w1", nil)
+	}
+	if resp := s.checkStaleRead(gateReq("pcb.components.list", "w1", "ceshi")); resp == nil {
+		t.Fatal("metadata reads must not unlock primitive reads")
+	}
+	gateMark(s, "debug.exec_js", "w1", map[string]any{"code": "await eda.dmt_EditorControl.closeDocument(id)"})
+	if resp := s.checkStaleRead(gateReq("pcb.components.list", "w1", "ceshi")); resp != nil {
+		t.Fatal("real reload must unlock primitive reads")
+	}
+}
