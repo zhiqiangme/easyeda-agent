@@ -80,3 +80,18 @@ probe / cleanup / cleanup-rest JSON）。当前宿主问题阻塞下，保留错
 
 补充修复的全量 `go test ./...`、文档守卫 `-race`、Skill lint / package check 全部通过。
 身份不一致测试覆盖文档 UUID、类型、项目；修复测试 fixture 的 health 路径后全量复跑通过。
+
+## ceshi 恢复复核（23:04–23:08，UTC+8）
+
+- 当前同名工程 UUID 为 `475cc0f773ed4a6fb7a02336c8a6a67f`，与前轮不同；
+  PCB1 为 `7dc1c3e4a818108c`。Board1、PCB 总表及当前 PCB 元数据均恢复可读，
+  `doc open` 可打开，UI 可读取 PCB1 编辑器结构。旧工程清理待办不能套用到本工程。
+- `pcb add-component` 仍报 `Cannot convert undefined or null to object`；
+  `silk-add` 仍报无法创建文本图元。执行 `doc reload`（保存、关闭、重开）并将
+  Chrome ceshi 标签激活后，再按名称 `--doc PCB1` 放置，仍为同一错误。
+- 只读探针身份前后一致，PCB 元数据正常，器件各枚举与线段枚举全部为 0。
+  没有成功放置的已知图元，仍不构成 #200 的非空板空读复现，也不能验收连续移动。
+- 本轮未成功创建测试器件，不盲目删除；回读器件仍为 0。连接器为 1.4.2，
+  CLI/daemon 为开发构建；版本检查提示最新发行版 1.4.3，未将旧连接器视为同版验收。
+- 原始响应保留于 `/tmp/easyeda-issue-live-20260908-recovered/`，包含 add、silk、
+  probe、add-after-reload。本轮仅记录实机证据，未修改代码、未重跑已通过的离线测试。
