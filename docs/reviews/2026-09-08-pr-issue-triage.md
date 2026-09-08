@@ -1,5 +1,9 @@
 # PR / Issue 排查（2026-09-08）
 
+当前远端同步状态（2026-09-09）：已向 #190、#192、#201、#191、#200 和 PR #199
+发布验证进度；明确标注本地修复尚未推送、平台原生验证限制及未解决项。Issue 与 PR
+均保留开放。以下开头表格为首次排查快照，最终实测结果见后续各节。
+
 本轮读取全部 1 个开放 PR、6 个开放 Issue 及评论；下表为首次排查快照。后续实际修复见本文末尾，尚未向 GitHub 发评论、合并或关闭。
 
 | 项目 | 结论及本轮处理 | 后续验收 |
@@ -192,3 +196,17 @@ Windows DSH 真机验收。CI 已接入，未推送触发。
 本轮没有改 Go 实现，沿用此前全量 Go 通过结果。#190 的当前环境普通 CLI 回归已完成，
 #192 的跨平台文件功能已实测，PowerShell 5.1 原生命令解析仍待对应环境。
 #200 旧版宿主复现、#173 编组、#43 完整整板验收及 #199 真实 3D 导入仍未完成。
+
+## GitHub 进度同步（2026-09-09）
+
+- [#190](https://github.com/zhoushoujianwork/easyeda-agent/issues/190#issuecomment-5588240718)
+- [#192](https://github.com/zhoushoujianwork/easyeda-agent/issues/192#issuecomment-5588241084)
+- [#201](https://github.com/zhoushoujianwork/easyeda-agent/issues/201#issuecomment-5588241501)
+- [#191](https://github.com/zhoushoujianwork/easyeda-agent/issues/191#issuecomment-5588241883)
+- [#200](https://github.com/zhoushoujianwork/easyeda-agent/issues/200#issuecomment-5588242274)
+- [PR #199](https://github.com/zhoushoujianwork/easyeda-agent/pull/199#issuecomment-5588242636)
+
+再次对照 PR #199：原提交 982eaf6 与采用提交 cf36d45 的 dispatch.go 内容完全一致；
+原 2MiB 请求测试保留，本地新增 32MiB 精确边界与多 1 字节拒绝测试，署名保留。
+针对请求体的回归再次通过。当前远端尚无采用提交，因此未关闭 PR；推送并完成 CI 后
+可按“已在 main 采纳”关闭，无需重复合入相同实现。
