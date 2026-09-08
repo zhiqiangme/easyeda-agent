@@ -197,35 +197,46 @@ codex mcp add easyeda-agent \
 
 ## 效果演示
 
-### 实战展示:一份需求文档 → 三页原理图正式交付
+### 宏恩门禁：本地数据 → SCH Apply → 真实原理图
 
-v1.0.0 的原理图全流程真机成图(esp32Mini 固定回归用例):输入只是一份**不含 BOM/网表的
-客户口吻需求文档**,agent 沿 S0–S6 自己完成选型、放置、连线、分区与门禁——
-**3 页原理图 / 26 个真实 LCSC 库件 / 18 网黄金表逐脚全对 / 复用 6 个电路块 /
-8 个分区框 + 7 条电路说明**,分区框、区名与电路说明全部由算法计算落位,逐页
-`sch gate --strict` 通过。
+器件、完整物理引脚、稳定网络 ID 和 NC 保存在本地连接图中。Agent 先依据实测引脚几何
+计算功能 Lib 内的器件位置、方向和连线，再组合页面，通过 `sch apply` 顺序写入
+EasyEDA，并回读核对。原位号与器件身份保持不变。
 
-![P1 电源页:AMS1117 LDO 降压,分区框 + 区名 + 电路说明由算法落位](docs/images/sch-p1-power.png)
+**23 个器件 · 165 个物理引脚 · 28 个网络 · 2 页原理图**
 
-P1 电源页:AMS1117 LDO(5V→3V3)分区框 + 区名 + 电路说明,全部算法计算落位。
+#### 电源与 RF 主控
 
-![P2 主控页:ESP32 WROOM 最小系统 + 按键 + LED,三个分区框](docs/images/sch-p2-mcu.png)
+![宏恩门禁电源与 RF 主控页：外围电路按引脚方向连接，粉色虚线框标识功能模块](docs/images/hongen-power-rf.png)
 
-P2 主控页:WROOM 最小系统、BOOT/RESET 按键、指示 LED 三个功能分区。
+电源、RF 主控和下载接口分别组成 Lib；外围电路按引脚方向连接，端口长短错落，
+粉色虚线框与 0.2 inch 标题由数据计算。
 
-![P3 USB 页:CH340 + USB-C + 自动下载电路,四个分区框](docs/images/sch-p3-usb.png)
+#### 对讲与外设接口
 
-P3 USB 页:CH340 USB 串口、USB-C 接口、自动下载等四个功能分区。
+![宏恩门禁对讲与外设接口页：功能模块按 Z 字阅读顺序排列，各框随内容独立收紧](docs/images/hongen-talk-interfaces.png)
+
+从左上角按 Z 字阅读顺序排列，每框随内容独立收紧并保留最小内边距；同行顶齐，
+下一行按本行最大高度推进。标题利用上方或下方空档，减少额外高度。
+
+#### Apply 实际执行
+
+![宏恩原理图的实际 Apply 阶段捕捉，加速播放](docs/assets/hongen-sch-apply.gif)
+
+动图使用电源与 RF 主控页实际 Apply 捕捉的 12 张关键阶段导图，加速播放；两张静图为 EasyEDA 官方导图。
+录制脚本与复现步骤见 [Apply 动图捕捉](docs/schematic-showcase.md)。
+两页布局与连接检查均为 0 错误、0 警告；官方 DRC 仍有 3 WARN，严格门禁未通过，部分文字避让仍待完善。
+完整验证范围见 [1.4 发布与验证](docs/release-1.4.md)。
+
+### 历史 PCB 案例：ESP32-S3 四层板
 
 > **完整实战案例:[一份需求文档 → AI 全自动画完 ESP32-S3 四层板](docs/showcase-esp32-mini.md)** ——
 > 19 器件原理图 + 四层 PCB(GND 内电层/VCC 电源层/天线禁铜/四角 M3),
 > `pcb drc` Connection/Clearance 双归零、`pcb check` 0、`layout-lint` 100/100,附原生截图与全流程复盘。
 
-下面两段录屏来自真实 EasyEDA 画布:AI 从空白页开始生成原理图,再切到 PCB 完成布局、板框、铺铜和丝印。它不是生成一张电路图图片,而是在编辑器里一步步执行 typed actions:
+下面的历史录屏来自 ESP32 回归板的真实 EasyEDA 画布，展示 PCB 布局、板框和铺铜：
 
-| 原理图从空白页生成 | PCB 布局与铺铜 |
-|---|---|
-| <img src="docs/assets/demo-schematic-generation.gif" width="420" alt="AI 在 EasyEDA 中从空白页生成原理图"/> | <img src="docs/assets/demo-pcb-layout.gif" width="420" alt="AI 在 EasyEDA 中完成 PCB 布局、板框和铺铜"/> |
+![AI 在 EasyEDA 中完成 PCB 布局、板框和铺铜](docs/assets/demo-pcb-layout.gif)
 
 下面这块板由 agent 驱动完整 PCB 流程产出——**自动布局 → 板框贴合 → 规则感知布线 → 4 层电源平面 → 丝印碰撞避让**——并在真实 EasyEDA 画布上验证(DRC 31 → 3、No-Connection 归零):
 
@@ -239,22 +250,7 @@ P3 USB 页:CH340 USB 串口、USB-C 接口、自动下载等四个功能分区�
 |---|---|
 | <img src="docs/assets/demo-outline-before.png" width="330" alt="前:板框过大"/> → <img src="docs/assets/demo-outline-after.png" width="330" alt="后:板框贴合器件"/> | <img src="docs/assets/demo-silk-before.png" width="330" alt="前:位号散乱重叠"/> → 对齐后见上方成品板 |
 
-> 上面 GIF 和截图都来自回归板真机流程(原理图 → 导入 PCB → 4 层叠层 → 布局 → GND 内电层/VCC 信号 plane → 天线禁区+检查 → 丝印/LED 极性 → 挖槽),非 mockup。这也是项目的固定端到端回归用例(拿原始需求从零跑),见 [esp32MiniRequire.md](esp32MiniRequire.md)。
-
-### 原理图自动放置:两个引擎(模板 vs 官方)
-
-同一个 ESP32-S3R8 最小系统块,两种放置引擎的真机对比(都 `sch check` 0 悬空导线、已连线):
-
-| `--engine template`(默认,推荐) | `--engine official`(官方 autoLayout 兜底) |
-|---|---|
-| <img src="docs/assets/demo-sch-template.png" width="420" alt="模板引擎:功能分组、去耦贴芯片、紧凑可读"/> | <img src="docs/assets/demo-sch-official.png" width="420" alt="官方引擎:连通性放射状散布、已连线"/> |
-| 块 `schematic_layout` 模板驱动:**去耦帽贴电源脚一字排开、上拉靠引脚、晶振/FLASH 分列**,信号流左入右出,**功能分组、紧凑可读**;原点自动避碰、落后真实 bbox 自检 | 平台 `eda.sch_Document.autoLayout()`(@beta):**连通性聚类放射状**,较散、留白大;是**破坏性**长操作(移件不移线),封装加了安全管线(已连线守卫/吸附 5 格/`--rewire` 重连/`sch check` 自检) |
-
-两版都能用、都还有少量重叠(模板版当前还会碰标题栏右下角,官方版散件间距不均),**放置的正确性由机械门禁保证**:`sch layout-lint`(真实 bbox 查重叠)+ `sch check`/`bridge-check`(查断线/短路)。多页工程/长操作用 `--doc <page>` flag **机制性地钉住目标页**,不再靠人工切页(避免长命令落错页)。
-
-> 官方引擎在真正调用 `autoLayout()` 前会二次核对同一页的部件姿态、sheet 与全部 connectivity（wire/bus/net marker），并在启动变异的同一个 JS action 内再锁一次 document/input；`--rewire` 还核对完整网表，输入漂移立即拒绝。bus 目前无法可靠重建，即使 `--rewire` 也拒绝。后续 snap/重连/save 继续钉在同一 UUID；几何回读、`sch check`、重连或持久化任何一步不可用，或残留 overlap / pin 重合 / dangling 等结构性问题，都会非零退出。官方 API 没有事务回滚，因此 post-check 失败表示“页面已变但未过门”，必须先修复或撤销。
-
-> **优先级铁律**:命中电路块 → `sch block-apply` 模板;有 S0 分区 spec → `--engine template`;都没有才 `--engine official` 兜底。功能分组的模板版是首选,官方引擎只作未建模页面的起点。分区方框与标题由本地数据计算后通过 `sch frame apply/check` 写入和核验。
+> 本节 PCB GIF 和截图来自 ESP32 回归板真机流程(原理图 → 导入 PCB → 4 层叠层 → 布局 → GND 内电层/VCC 信号 plane → 天线禁区+检查 → 丝印/LED 极性 → 挖槽)。这是独立于宏恩原理图的历史回归案例，原始需求见 [esp32MiniRequire.md](esp32MiniRequire.md)。
 
 ## 能力清单(已支持)
 

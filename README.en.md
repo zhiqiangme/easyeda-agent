@@ -201,20 +201,53 @@ Restart the agent client after registration. Other MCP clients can use the same
 stdio command and environment configuration. See [`mcp/README.md`](mcp/README.md)
 for the tool inventory and development checks.
 
-## Demo Example
+## Showcase
 
-A board driven end-to-end through the typed-action + Skill workflow — placed
-**entirely from real LCSC / 立创 library parts** (search → place by uuid → wire →
-flag → DRC), not hand-drawn symbols. Layout follows the
-[auto-layout SOP](skills/easyeda-agent/references/auto-layout-sop.md) distilled
-from a 嘉立创 reference design: **flags only on power/ground rails; signals are real
-local orthogonal wires; decoupling hugs each IC's VCC pad; multi-page by function.**
+### Hongen access control: local data → SCH Apply → a real schematic
 
-This is also the project's fixed end-to-end regression case — driven from the raw
-requirement in [esp32MiniRequire.md](esp32MiniRequire.md) (the agent does all the
-engineering itself; no pre-solved BOM/netlist is handed to it).
+Components, physical pins, stable net IDs, and NC states live in a local
+connectivity graph. The agent calculates component positions, orientations,
+and wiring within each functional Lib from measured pin geometry, composes the
+page, then applies the plan to EasyEDA and checks the readback. Original
+designators and component identities stay intact.
 
-### ESP32-S3-WROOM-1 minimal system board
+**23 components · 165 physical pins · 28 nets · 2 schematic sheets**
+
+#### Power and RF controller
+
+![Hongen power and RF controller sheet, with pin-oriented peripheral wiring and pink dashed functional frames](docs/images/hongen-power-rf.png)
+
+Power, the RF controller, and the programming interface each form a Lib.
+Peripheral wiring follows pin directions, terminal wires use staggered lengths,
+and pink dashed frames with 0.2 inch titles are calculated from the data.
+
+#### Talk controller and peripheral interfaces
+
+![Hongen talk and interface sheet, with compact functional frames in Z-order reading sequence](docs/images/hongen-talk-interfaces.png)
+
+Libs follow a Z-order reading sequence from the top left. Each frame fits its own
+contents with a minimum inset; frames align at the top of each row, and the next
+row starts below its tallest frame. Titles use available space above or below
+the circuit to reduce height.
+
+#### SCH Apply in action
+
+![Actual Hongen SCH Apply stages, captured and played back at an accelerated pace](docs/assets/hongen-sch-apply.gif)
+
+The animation uses 12 official exports captured during the power and RF controller
+sheet's actual Apply, played back at an accelerated pace. Both still images are official EasyEDA exports.
+See [Apply capture instructions](docs/schematic-showcase.md) for the script and reproduction steps.
+Both sheets passed local layout and connectivity checks with zero errors and
+warnings. Official DRC still reports 3 warnings, so the strict gate did not pass;
+some text placement needs refinement. See [the 1.4 validation record](docs/release-1.4.md) for the tested scope.
+
+### Historical PCB case: ESP32-S3-WROOM-1 minimal system board
+
+This separate regression case starts from the raw requirement in
+[esp32MiniRequire.md](esp32MiniRequire.md), with the agent selecting real LCSC
+parts and designing the circuit. See the [full PCB case study](docs/showcase-esp32-mini.md).
+
+![AI executing PCB placement, board outline creation, and copper pours in EasyEDA](docs/assets/demo-pcb-layout.gif)
 
 The board below was produced by the agent driving the full PCB flow — **auto-place →
 outline-fit → rule-aware route → 4-layer power planes → collision-aware silk** — then

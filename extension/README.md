@@ -13,23 +13,44 @@ Skill / CLI -> Go daemon -> EDA Agent Connector -> 官方 eda.* API
 
 ## 效果演示
 
-AI 从空白页开始生成原理图——不是生成一张电路图图片,而是在编辑器里一步步执行 typed actions,放真实 LCSC 库件、连真实导线:
+### 宏恩门禁：本地数据 → SCH Apply → 真实原理图
 
-![AI 在 EasyEDA 中从空白页生成原理图](images/demo-schematic-generation.png)
+器件、物理引脚、稳定网络 ID 和 NC 保存在本地连接图中。Agent 依据实测引脚几何计算
+功能 Lib 内的器件位置、方向和连线，再组合页面，通过 `sch apply` 顺序写入 EasyEDA
+并回读核对，保留原位号与器件身份。
 
-切到 PCB:自动布局、板框贴合、铺铜、丝印,全程在真实画布上执行并回读校验:
+**23 个器件 · 165 个物理引脚 · 28 个网络 · 2 页原理图**
+
+![宏恩门禁电源与 RF 主控页：外围电路按引脚方向连接，粉色虚线框标识功能模块](images/hongen-power-rf.png)
+
+电源、RF 主控和下载接口分别组成 Lib；外围电路按引脚方向连接，端口长短错落。
+
+![宏恩门禁对讲与外设接口页：功能模块按 Z 字阅读顺序排列，各框随内容独立收紧](images/hongen-talk-interfaces.png)
+
+对讲与外设按 Z 字阅读顺序排列，每框随内容独立收紧并保留内边距，标题利用上方或下方空档。
+
+![宏恩原理图的实际 Apply 阶段捕捉，加速播放](images/hongen-sch-apply.gif)
+
+动图使用电源与 RF 主控页实际 Apply 捕捉的 12 张关键阶段导图，加速播放；静图为 EasyEDA 官方导图。
+录制方法见 [Apply 动图捕捉](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/schematic-showcase.md)。
+两页布局与连接检查均为 0 错误、0 警告；官方 DRC 仍有 3 WARN，严格门禁未通过，部分文字避让仍待完善。
+验证范围见 [1.4 发布与验证](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/release-1.4.md)。
+
+### 历史 PCB 案例：ESP32-S3 四层板
+
+以下为独立的 ESP32 回归板案例：自动布局、板框贴合、铺铜、丝印，在真实画布上执行并回读校验。
 
 ![AI 在 EasyEDA 中完成 PCB 布局、板框和铺铜](images/demo-pcb-layout.gif)
 
-由 agent 驱动完整 PCB 流程产出的 ESP32-S3 成品板:自动布局 -> 板框贴合 -> 规则感知布线 -> 4 层电源平面 -> 丝印碰撞避让,DRC 在真实 EasyEDA 画布上验证通过:
+由 agent 驱动 PCB 流程产出的 ESP32-S3 板：自动布局 → 板框贴合 → 规则感知布线 → 4 层电源平面 → 丝印碰撞避让。历史验证记录见 [完整案例](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/showcase-esp32-mini.md)。
 
 ![ESP32-S3 成品板:4 层电源平面 + 圆角板框 + 位号对齐](images/demo-esp32-board.png)
 
-## 1.4.2 数据驱动原理图
+## 1.4 数据驱动原理图
 
 - **数据 → Lib compose → SCH Apply**:在 canonical 数据中维护器件、引脚、网络与 NC,先设计 Lib 局部几何,再离线组合单页,通过顺序队列调用官方 API 并回读验证。
 - **身份与显示分开**:稳定器件 ID 用于数据绑定,合法数字位号保持原样,功能名称存 Role。
-- **紧凑布局与方框**:从左上向右按 Z 字排列、各行等高;粉色虚线框配 0.2 inch 标题,优先利用电路上方或下方空档,不另生成 Notes。
+- **紧凑布局与方框**:从左上向右按 Z 字排列，每框按内容独立收紧并保留最小内边距，同行顶齐，下一行按本行最大高度推进；粉色虚线框配 0.2 inch 标题，优先利用电路上方或下方空档。
 
 版本与资产以 GitHub Release 为准。组合器使用已设计的模块几何,
 不自动推导任意外围电路、分页或删除源页。构建步骤、已完成验证和未完成项见
