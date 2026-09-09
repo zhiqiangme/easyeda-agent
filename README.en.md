@@ -16,7 +16,7 @@
 
 ![easyeda-agent workflow](docs/assets/easyeda-agent-workflow.svg)
 
-> **Version 1.4.3.** Schematic work starts from component,
+> **Version 1.4.4.** Schematic work starts from component,
 > pin, and connectivity data: design each Lib circuit and its geometry locally,
 > compose one sheet with `sch compose`, then execute and verify with `sch apply`.
 > See [1.4 release and validation](docs/release-1.4.md) for release status and validation limits.
@@ -306,7 +306,7 @@ Both sides of the action protocol are in place and working. The Go daemon owns t
 
 ## Capabilities
 
-Capabilities are exposed through CLI subcommands (`easyeda <domain> <verb>`). Validation completed for version 1.4.3, including its remaining limits, is listed in [1.4 release and validation](docs/release-1.4.md).
+Capabilities are exposed through CLI subcommands (`easyeda <domain> <verb>`). Validation completed for version 1.4.4, including its remaining limits, is listed in [1.4 release and validation](docs/release-1.4.md).
 
 **Schematic**
 - Place real library/LCSC parts by uuid, then wire them (`sch` place/wire); power/ground **net-flags** via `connect_pin` (auto-compensates the rotation-store quirk).

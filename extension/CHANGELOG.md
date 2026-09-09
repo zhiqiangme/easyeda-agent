@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+## [1.4.4] — 2026-09-09
+
 ### Fixed
 
+- Keep the DSH bundle version aligned with this release and publish to SkillHub using its environment token without writing a runner credential file.
 - Verify explicit resistance queries numerically before ranking parts; preserve milli/mega prefixes and reject matches inferred from MPN digits. Add Skill guidance to retain parameter sources and verify manufacturer-specific value codes (#202).
 - Skip rotation calibration when connecting a native schematic net label, which has no rotation parameter. The host's EDA v4 label API remains pending on the tested 3.2.186 host; this does not claim native-label compatibility is fixed (#191).
 - Resolve DSH MCP and Skill file URLs with Node's `fileURLToPath`, preserving Windows drive/UNC paths and escaped characters (#201); add cross-platform path and native-launch CI tests.
@@ -24,7 +27,9 @@
 
 ### Validation
 
-- Add command-level patch-file regression tests and a Windows PowerShell 5.1 native executable test to the cross-platform CI job. The PowerShell test is skipped on non-Windows hosts; a skip is not a Windows pass.
+- Windows PowerShell 5.1 native executable regressions pass for both schematic and PCB patch files; Linux/macOS/Windows install smoke and DSH path tests pass in CI.
+- 20 resistance-selection regressions, 60 script tests, 280 connector tests and the Go/Skill checks pass. Live EasyEDA 3.2.186 PCB moves, silk creation and save/reopen readback pass.
+- Native net-label creation (#191), the reported old-host empty reads (#200), grouping (#173) and the complete ESP32 board acceptance (#43) remain open. Actual 3D import and the complete Windows DSH loader/editor workflow were not rerun.
 
 ## [1.4.3] — 2026-09-08
 

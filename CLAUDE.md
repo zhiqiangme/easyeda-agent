@@ -54,9 +54,11 @@ reply as chiense! reply as chiense! reply as chiense!
 on `main` by default (user preference). Don't `git checkout -b`; just commit to
 `main`. When the user asks to submit fixes, update GitHub progress, or handle PRs,
 that authorizes committing and pushing the related verified changes without a
-second push confirmation. After the adopted changes are on remote `main` and
-relevant CI passes, close a fully adopted PR with a linked adoption commit.
-Keep unresolved issues open and report remaining validation gaps accurately.
+second push confirmation. For completed issue/PR fixes, publish a patch release
+and close fixed issues or fully adopted PRs with links to the release/adoption
+commit; do not wait for reporter revalidation or add tests solely to close them.
+Run required automated/release checks as part of delivery. Keep unresolved issues
+open and report remaining validation gaps accurately.
 
 ## Layout
 
@@ -176,7 +178,7 @@ easyeda update --check    # 只读 CLI / Skill / connector 版本表
   `curl -fsSL https://skillhub.cn/install/install.sh | bash -s -- --cli-only`。
   同名 CLI 可能属于其他服务，`make skillhub-check` 按实际 `publish` 参数校验身份，
   必要时用 `SKILLHUB_BIN` 指定。仓库 secret 为 `SKILLHUB_TOKEN`；CI 的身份检查会在
-  临时 runner 登录再 `auth whoami`，publish 读取同名环境变量。不要回显 token 或写进工程文件。
+  publish 直接读取同名环境变量并完成鉴权；不运行 login/whoami，不回显 token 或写入凭据文件。
 - **SkillHub 包格式**：其 `slug/displayName` 只注入临时 staging 副本；仓库 `SKILL.md`
   保持 Agent Skills 格式。不要为了平台字段破坏公共包的 frontmatter。
 - **立创连接器市场 jlc-ext**：仍需人工通过网页提交，没有发布 CLI/API。

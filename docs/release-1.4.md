@@ -1,9 +1,19 @@
 # 1.4 发布与验证
 
-当前维护版本为 **v1.4.3**。CLI/daemon、EDA Agent Connector 与
+当前维护版本为 **v1.4.4**。CLI/daemon、EDA Agent Connector 与
 `easyeda-agent` Skill 使用同一版本；EasyEDA Pro 是运行宿主。发布状态与下载以
-[GitHub Release](https://github.com/zhoushoujianwork/easyeda-agent/releases/tag/v1.4.3)
+[GitHub Release](https://github.com/zhoushoujianwork/easyeda-agent/releases/tag/v1.4.4)
 为准，变更明细见 [Changelog](../extension/CHANGELOG.md)。
+
+## 1.4.4 修复范围
+
+本次维护版本包含 PCB 文档定位/连续移动/保存重开和丝印修复、PowerShell 5.1
+`--patch-file`、DSH Windows 路径转换，以及电阻参数来源核验和数值匹配。3D 请求体
+上限提升至 32 MiB，并覆盖精确边界。已修复的 #190/#192/#201/#202 随发版关闭，
+不等待报告者复验；PR #199 已按完整采纳关闭。
+
+源代码 CI 与原生 Windows PowerShell/安装测试已通过；#191/#200/#173/#43 的未解决
+范围继续保留。关闭条目不增加“原报告环境或整板已全部验收”的声明。
 
 ## 1.4 数据驱动原理图闭环
 
@@ -42,13 +52,13 @@ make lint-test
 make blocks-audit
 npm --prefix extension test
 make release-script-test
-make release-check VERSION=v1.4.3
-make release-build VERSION=v1.4.3
+make release-check VERSION=v1.4.4
+make release-build VERSION=v1.4.4
 ```
 
 `release-build` 生成五平台 CLI、稳定 UUID 的连接器、`skills.tar.gz`、安装器和
 `checksums.txt`，并核对版本、资产名、SHA-256、Skill 包内链接和本机 CLI。它不会创建
-tag 或上传资产。正式发布由 `make release VERSION=v1.4.3` 完成；GitHub Release 发出后
+tag 或上传资产。正式发布由 `make release VERSION=v1.4.4` 完成；GitHub Release 发出后
 触发 SkillHub CI，ClawHub 发布为 best-effort。
 
 ## 门禁控制板示例现场验证
@@ -68,4 +78,4 @@ compose。这些结果证明数据转换和 Apply 闭环可用，不代表整板
 - 本轮没有按 `esp32MiniRequire.md` 第一节重跑 `ceshi` 从原始需求到四层 PCB 的完整验收。
 - 五平台资产会构建并做隔离 smoke；非 macOS 平台的原生执行以 GitHub Actions 为证据。
 - 通用外围电路不会凭空推断；缺少数据手册、器件或职责冲突时必须保留未决状态。
-- 单页放不下时允许由上层规划拆成两页，1.4.3 不宣称自动分页。
+- 单页放不下时允许由上层规划拆成两页，1.4.4 不宣称自动分页。
