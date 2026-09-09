@@ -1,9 +1,30 @@
 # 1.4 发布与验证
 
-当前维护版本为 **v1.4.4**。CLI/daemon、EDA Agent Connector 与
+当前维护版本为 **v1.4.5**。CLI/daemon、EDA Agent Connector 与
 `easyeda-agent` Skill 使用同一版本；EasyEDA Pro 是运行宿主。发布状态与下载以
-[GitHub Release](https://github.com/zhoushoujianwork/easyeda-agent/releases/tag/v1.4.4)
+[GitHub Release](https://github.com/zhoushoujianwork/easyeda-agent/releases/tag/v1.4.5)
 为准，变更明细见 [Changelog](../extension/CHANGELOG.md)。
+
+## 版本升级与保留规则
+
+- 未修改连接器运行代码、构建配置、manifest 能力或 action 契约时，升 patch：
+  `1.4.4` → `1.4.5`。
+- 用户必须更新或重新导入连接器才能获得新行为时，升 minor 并把 patch 归零：
+  `1.4.x` → `1.5.0`。破坏公共契约的变更仍升 major。
+- CLI、daemon、连接器发布资产和 Skill 继续使用同一个完整版本号。连接器只差 patch
+  时版本门会告警，差 minor 或更高时阻断，避免 CLI 调到旧插件不存在的 handler。
+- 每条 minor 线只维护最新 patch，GitHub 的 `Latest` 和各 Skill 平台的 `latest` 指向
+  最新版。已经发布的 tag、Release 与资产不删除；它们承担固定版本下载、回滚、校验和
+  与审计职责。旧 patch 视为历史/superseded，不再补修；清理只针对本地 `dist/` 等
+  可重建产物。
+
+## 1.4.5 修复范围
+
+本次维护版本落实 #203 的第一项建议：明确 Altium Designer `.SchDoc` / `.PcbDoc`
+当前没有可用的 typed action 或 CLI 导入入口，迁移应使用 EasyEDA Pro 的
+**文件 → 导入 → Altium Designer** GUI。导入后必须回读原理图连接、PCB 板框、层叠、
+机械层和禁布区，并通过现有门禁。官方 beta API 返回 `undefined` 或未产生工程/文档
+副作用时必须判失败；本版本没有宣称实现程序化 AD 导入或 preflight 命令。
 
 ## 1.4.4 修复范围
 
@@ -53,13 +74,13 @@ make lint-test
 make blocks-audit
 npm --prefix extension test
 make release-script-test
-make release-check VERSION=v1.4.4
-make release-build VERSION=v1.4.4
+make release-check VERSION=v1.4.5
+make release-build VERSION=v1.4.5
 ```
 
 `release-build` 生成五平台 CLI、稳定 UUID 的连接器、`skills.tar.gz`、安装器和
 `checksums.txt`，并核对版本、资产名、SHA-256、Skill 包内链接和本机 CLI。它不会创建
-tag 或上传资产。正式发布由 `make release VERSION=v1.4.4` 完成；GitHub Release 发出后
+tag 或上传资产。正式发布由 `make release VERSION=v1.4.5` 完成；GitHub Release 发出后
 触发 SkillHub CI，ClawHub 发布为 best-effort。
 
 ## 门禁控制板示例现场验证
@@ -79,4 +100,4 @@ compose。这些结果证明数据转换和 Apply 闭环可用，不代表整板
 - 本轮没有按 `esp32MiniRequire.md` 第一节重跑 `ceshi` 从原始需求到四层 PCB 的完整验收。
 - 五平台资产会构建并做隔离 smoke；非 macOS 平台的原生执行以 GitHub Actions 为证据。
 - 通用外围电路不会凭空推断；缺少数据手册、器件或职责冲突时必须保留未决状态。
-- 单页放不下时允许由上层规划拆成两页，1.4.4 不宣称自动分页。
+- 单页放不下时允许由上层规划拆成两页，1.4.5 不宣称自动分页。

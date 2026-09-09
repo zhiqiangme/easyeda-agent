@@ -112,6 +112,14 @@ Playbook 使用 `version:1`、`meta` 和有序 `steps`。每步只选一种执�
 需要底层方法时先 `easyeda api search <query>`。typed action 尚缺的行为可临时探测，
 验证后再实现 CLI；不把重复 debug 脚本积累成生产流程。
 
+## 外部工程导入边界
+
+Altium Designer `.SchDoc` / `.PcbDoc` 当前没有可用的 typed action。官方 beta
+`sys_FileManager.importProjectByProjectFile` 在已报告的 3.2.149 本地工作区会静默返回
+`undefined` 且不产生工程副作用，不能包装后当成功。`sys_FormatConversion` 的 Altium
+入口只适用于 `.SchLib` / `.PcbLib` 库转换。工程迁移使用 EasyEDA Pro GUI，随后按
+[project-import.md](project-import.md) 回读原理图、PCB 和机械数据。
+
 ## PCB 基础上下文（非穷举）
 
 - `pcb.documents.list` — 工程内所有 PCB 文档（uuid + name）

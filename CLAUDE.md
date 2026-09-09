@@ -54,9 +54,9 @@ reply as chiense! reply as chiense! reply as chiense!
 on `main` by default (user preference). Don't `git checkout -b`; just commit to
 `main`. When the user asks to submit fixes, update GitHub progress, or handle PRs,
 that authorizes committing and pushing the related verified changes without a
-second push confirmation. For completed issue/PR fixes, publish a patch release
-and close fixed issues or fully adopted PRs with links to the release/adoption
-commit; do not wait for reporter revalidation or add tests solely to close them.
+second push confirmation. For completed issue/PR fixes, publish a release using
+the version policy below and close fixed issues or fully adopted PRs with links
+to the release/adoption commit; do not wait for reporter revalidation or add tests solely to close them.
 Run required automated/release checks as part of delivery. Keep unresolved issues
 open and report remaining validation gaps accurately.
 
@@ -114,6 +114,21 @@ skills/easyeda-agent/scripts/lint.sh <project> --save   # full lint + record bas
 ```
 
 ## Release workflow
+
+### Version and retention policy
+
+- If the connector runtime (`extension/src/**`, its build/configuration, manifest capabilities,
+  or action contract) does not change, increment patch: `1.4.4` → `1.4.5`.
+- If users must update/re-import the connector to obtain the behavior, increment minor and reset
+  patch: `1.4.x` → `1.5.0`. Breaking public contracts still require a major increment.
+- CLI, daemon, connector asset and Skill keep one full release version even when the connector
+  runtime is unchanged. The version gate treats patch-only connector drift as a warning and
+  minor-or-larger drift as blocking.
+- Only the newest patch in each minor line is maintained and presented as current. Never delete
+  published Git tags, GitHub Releases or assets merely because a newer patch exists: they are
+  rollback, checksum and audit records, and fixed-version install links may still depend on them.
+  GitHub's `Latest` pointer and hub `latest` tags move to the newest release; older patches are
+  historical/superseded and receive no further fixes.
 
 发布分为本地准备与外部发布。准备阶段先显式同步
 `extension/extension.json`、`extension/package.json`、`extension/package-lock.json`

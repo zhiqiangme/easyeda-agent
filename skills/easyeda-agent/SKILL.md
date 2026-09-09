@@ -5,7 +5,7 @@ license: MIT
 compatibility: "Requires the local easyeda CLI/daemon and EasyEDA Agent Connector with Allow external interaction enabled. Python 3 is used by bundled helpers; online library lookup and updates need network access."
 metadata:
   author: zhoushoujianwork
-  version: "1.4.4"
+  version: "1.4.5"
   homepage: "https://github.com/zhoushoujianwork/easyeda-agent"
 ---
 
@@ -34,6 +34,7 @@ metadata:
 | 从需求到整板、原理图转 PCB | [design-flow.md](references/design-flow.md)；未确定的设计选项见 [design-decisions.md](references/design-decisions.md) |
 | PCB 放置/布线/检查 | [pcb.md](references/pcb.md)，再按任务读 [pcb-layout.md](references/pcb-layout.md) 或 [pcb-routing.md](references/pcb-routing.md) |
 | 选型、库器件、手册与标准电路 | [part-selection.md](references/part-selection.md)、[standard-parts.json](references/standard-parts.json)；先 `easyeda blocks search` 查可复用电路 |
+| Altium Designer / 外部工程导入 | [project-import.md](references/project-import.md)；当前由 GUI 导入，再用 typed 读取与门禁核验 |
 | 原理图/PCB 绘图规范 | [schematic-layout-conventions.md](references/schematic-layout-conventions.md)、[pcb-layout-conventions.md](references/pcb-layout-conventions.md) |
 | 制造规则 | [pcb-design-rules.md](references/pcb-design-rules.md)、[fab-rules-jlcpcb.json](references/fab-rules-jlcpcb.json) |
 | action 或队列字段 | [actions.md](references/actions.md)；未知官方接口先 `easyeda api search/show` |
@@ -74,6 +75,8 @@ metadata:
 ## 执行与验证约束
 
 - typed action 已有对应能力时使用它；无对应能力且用户接受调试路径时，才用 `debug.exec_js`。
+- `.SchDoc` / `.PcbDoc` 当前没有可用的程序化工程导入入口；按
+  [project-import.md](references/project-import.md) 走 EasyEDA GUI，导入后再由 typed 命令核验。
 - 使用真实非零导线连接 netflag 与 pin，坐标重合不算连接。原理图坐标 **y 向上**，网格 5 raw。
   符号方向以 [orientation.json](references/orientation.json) 和实际回读为准。
 - 保留明确 NC，不删除器件物理引脚，也不将缺失连接自动改为 NC。

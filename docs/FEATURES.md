@@ -15,6 +15,17 @@
 - typed actions 的精确清单始终以 `make actions` 为准，不单独维护数量。
 - 真实回归输入、验收门和运行步骤见 [`e2e-automation-acceptance.md`](e2e-automation-acceptance.md)。
 
+## 已知不支持：Altium Designer 工程自动导入
+
+- `.SchDoc` / `.PcbDoc` 当前没有 typed action 或 CLI 导入入口；使用 EasyEDA Pro 的
+  **文件 → 导入 → Altium Designer** GUI，再由现有读取、检查与保存命令核验结果。
+- 官方 beta `sys_FileManager.importProjectByProjectFile` 虽声明支持 AD，但 issue #203
+  在桌面端 3.2.149 本地工作区实测为 `undefined` 且没有文档/工程副作用，不能视为可用。
+- `sys_FormatConversion` 只覆盖 Altium 库文件，不覆盖工程文档。未来封装必须把无返回、
+  无变化和部分导入明确判失败，并核对连接图、板框、层叠和机械层。
+- 面向 Agent 的操作与验收说明见
+  [`project-import.md`](../skills/easyeda-agent/references/project-import.md)。
+
 ## Completed
 
 ### Absorbed from the official extension ecosystem (A1/A2/A3/A5)

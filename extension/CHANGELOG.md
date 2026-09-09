@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [1.4.5] — 2026-09-09
+
+### Documentation
+
+- Document the current Altium Designer project-import boundary: use EasyEDA Pro's GUI for `.SchDoc` / `.PcbDoc`, treat the beta API's `undefined`/no-op result as failure, and verify imported schematic, PCB outline and mechanical-layer data before continuing (#203).
+- Define release numbering and retention: patch for releases without connector-runtime changes, minor when users need a connector update, one maintained patch per minor line, and immutable published tags/releases retained for rollback and verification.
+
 ## [1.4.4] — 2026-09-09
 
 ### Fixed
