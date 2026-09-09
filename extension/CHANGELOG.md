@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.4.6] — 2026-09-09
+
 ### Changed
 
 - Make `easyeda update --check --exit-code` an exact GitHub-latest Agent-session gate for the CLI, installed Skill, running daemon and every connected Connector. Ahead, development, unknown, disconnected and stale states now block; Skill upgrades require ending the loaded Agent session and starting a new one before EDA work resumes.
