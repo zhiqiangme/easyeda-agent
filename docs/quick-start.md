@@ -6,7 +6,7 @@ easyeda-agent 有三个必须配套并保持同版的组成部分；EasyEDA Pro 
 |---|---|---|
 | **CLI / daemon** (`easyeda`) | 掌管 typed action 协议、状态、审计、产物、校验 | 本机 `PATH`(默认 `/usr/local/bin`) |
 | **连接器插件** (`.eext`) | 极薄桥接层,跑在 EasyEDA 内,把动作转成官方 `eda.*` 调用 | EasyEDA Pro「扩展管理」 |
-| **Skill** (`easyeda-agent`) | AI 客户端里的工作流、参考、脚本、规范 | `~/.claude/skills` 和/或 `~/.codex/skills` |
+| **Skill** (`easyeda-agent`) | AI 客户端里的工作流、参考、脚本、规范 | `~/.claude/skills`、`~/.codex/skills` 和/或 Codex Desktop 使用的 `~/.agents/skills` |
 | **EasyEDA Pro（宿主）** | 官方编辑器,需开启「允许外部交互」 | 桌面应用 |
 
 > **一句话记牢**:升级不是只升 CLI —— **CLI、连接器 `.eext`、Skill 三者要一起升到同一版本**,
@@ -24,14 +24,14 @@ curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main
 
 一键脚本会：
 - 安装/更新 `easyeda` CLI/daemon 到 `PATH`;
-- **自动检测已装的 AI 客户端**,把 `easyeda-agent` skill 装到对应目录 —— Codex(`~/.codex/skills/easyeda-agent`)、Claude Code(`~/.claude/skills/easyeda-agent`);
+- **自动检测已装的 AI 客户端**,把 `easyeda-agent` skill 装到对应目录 —— Codex(`~/.codex/skills/easyeda-agent`)、Codex Desktop 共享目录(`~/.agents/skills/easyeda-agent`)、Claude Code(`~/.claude/skills/easyeda-agent`);
 - 打印连接器 `.eext` 的下载地址。
 
 可用环境变量控制 skill 安装目标:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh -o install.sh
-EASYEDA_INSTALL_SKILLS=codex,claude bash install.sh  # 指定目标
+EASYEDA_INSTALL_SKILLS=codex,agents,claude bash install.sh  # 指定目标
 EASYEDA_INSTALL_SKILLS=none bash install.sh         # 只装 CLI
 EASYEDA_SKILL_PRESERVE=1 bash install.sh            # 保留本地内容及旧版本标记
 EASYEDA_VERSION='<vX.Y.Z>' bash install.sh          # 锁定发布版，跳过 API 查询
@@ -162,11 +162,12 @@ easyeda daemon health
 ```text
 请使用 easyeda-agent 完成 EasyEDA Pro 任务。
 
-开始前先确认 easyeda CLI/daemon、easyeda-agent Skill、EDA Agent Connector 插件
-处于同一发布版本。运行 easyeda update --check --exit-code；CLI 或 Skill 落后时运行
-easyeda update，Connector 落后时安装同一 GitHub Release 的
-easyeda-agent-connector.eext，保存文档并完全退出、重开 EasyEDA。确认已开启“允许外部
-交互”，运行 easyeda health 核对目标工程、页面和版本。
+把 easyeda update --check --exit-code 作为当前会话第一条命令。只有 easyeda CLI、
+easyeda-agent Skill、运行中 daemon、所有已连接 EDA Agent Connector 都可验证且精确等于
+GitHub latest 时继续。否则运行 easyeda update，重启 daemon；Connector 不同版时安装
+命令所示同一 GitHub Release 的 easyeda-agent-connector.eext，保存文档并完全退出、重开
+EasyEDA。任何组件升级后立即结束当前 Agent 会话并新开会话，从版本检查重新开始。确认
+已开启“允许外部交互”，再运行 easyeda health 核对目标工程、页面和版本。
 
 绘制原理图时先读取或建立本地 canonical connectivity JSON，以器件、完整物理引脚、
 稳定网络 ID、pin→net/NC 为权威数据；先在本地计算器件 XY、朝向、连线与功能 Lib，

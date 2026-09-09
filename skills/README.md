@@ -25,9 +25,10 @@ curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main
 ```
 
 The installer auto-detects your AI clients and installs/updates the
-`easyeda-agent` skill into each: Codex (`~/.codex/skills/easyeda-agent`) and
-Claude Code (`~/.claude/skills/easyeda-agent`). Set
-`EASYEDA_INSTALL_SKILLS=codex,claude` to force targets, `none` to skip, or
+`easyeda-agent` skill into each: Codex (`~/.codex/skills/easyeda-agent`), Codex
+Desktop's shared root (`~/.agents/skills/easyeda-agent`), and Claude Code
+(`~/.claude/skills/easyeda-agent`). Set
+`EASYEDA_INSTALL_SKILLS=codex,agents,claude` to force targets, `none` to skip, or
 `EASYEDA_SKILL_PRESERVE=1` to keep local edits during an update.
 
 If the installer stops at `GitHub API rate limit`, either authenticate

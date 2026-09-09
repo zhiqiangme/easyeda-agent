@@ -105,14 +105,14 @@ easyeda-agent 有三个必须配套的组成部分:CLI/daemon、连接器 `.eext
 curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
 ```
 
-一键脚本会：安装/更新 `easyeda` CLI/daemon;自动检测已安装的客户端并把 `easyeda-agent` skill 安装/更新到对应目录 —— Codex(`~/.codex/skills/easyeda-agent`)、Claude Code(`~/.claude/skills/easyeda-agent`);打印连接器 `.eext` 导入地址。
+一键脚本会：安装/更新 `easyeda` CLI/daemon;自动检测已安装的客户端并把 `easyeda-agent` skill 安装/更新到对应目录 —— Codex(`~/.codex/skills/easyeda-agent`)、Codex Desktop 共享目录(`~/.agents/skills/easyeda-agent`)、Claude Code(`~/.claude/skills/easyeda-agent`);打印连接器 `.eext` 导入地址。
 
 **装过之后升级不必再跑脚本 —— 用 `easyeda update`:**
 
 ```bash
 easyeda update              # CLI 二进制(sha256 校验 + 原子替换)+ skill 目录 → latest
 easyeda update --check      # 只读:cli / skill / connector 三方版本对齐表
-easyeda update --check --exit-code   # 有落后退出码 10(CI/agent 可 gate)
+easyeda update --check --exit-code   # 非精确 latest 或运行态不可验证则退出 10
 easyeda update --version <x.y.z>     # 钉版本;--skill-only / --cli-only 缩范围
 ```
 
@@ -122,7 +122,7 @@ dev 构建(git-describe 版本号)默认不覆盖,`--force` 才强升;二进制�
 可用环境变量控制 skill 安装:
 
 ```bash
-curl -fsSL .../install.sh | EASYEDA_INSTALL_SKILLS=codex,claude bash  # 指定目标
+curl -fsSL .../install.sh | EASYEDA_INSTALL_SKILLS=codex,agents,claude bash  # 指定目标
 curl -fsSL .../install.sh | EASYEDA_INSTALL_SKILLS=none bash  # 跳过 skill
 curl -fsSL .../install.sh | EASYEDA_SKILL_PRESERVE=1 bash  # 保留本地改动
 curl -fsSL .../install.sh | EASYEDA_VERSION='<vX.Y.Z>' bash  # 指定版本(跳过 API 查询)
@@ -166,10 +166,12 @@ EDA，避免直接从截图猜接或在页面上反复试摆：
 2. easyeda-agent Skill
 3. EDA Agent Connector 插件
 
-运行 easyeda update --check --exit-code。CLI 或 Skill 落后时运行 easyeda update；
-Connector 落后时安装同一 GitHub Release 的 easyeda-agent-connector.eext，保存文档并
-完全退出、重开 EasyEDA。确认已开启“允许外部交互”，运行 easyeda health 核对目标工程、
-页面和版本。
+把 easyeda update --check --exit-code 作为当前会话第一条命令。只有 CLI、Skill、运行中
+daemon 和所有已连接 Connector 都可验证且精确等于 GitHub latest 时继续。否则运行
+easyeda update，重启 daemon；Connector 不同版时安装命令所示同一 GitHub Release 的
+easyeda-agent-connector.eext，保存文档并完全退出、重开 EasyEDA。任何组件升级后立即结束
+当前 Agent 会话并新开会话，从版本检查重新开始。确认已开启“允许外部交互”，再运行
+easyeda health 核对目标工程、页面和版本。
 
 绘制原理图时先读取或建立本地 canonical connectivity JSON，以器件、完整物理引脚、
 稳定网络 ID、pin→net/NC 为权威数据；先在本地计算器件 XY、朝向、连线与功能 Lib，

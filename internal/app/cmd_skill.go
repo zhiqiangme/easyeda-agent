@@ -15,8 +15,9 @@ import (
 
 // newSkillCmd returns the "skill" subcommand group — inspect and update the
 // locally-installed easyeda-agent skill dirs (~/.claude/skills/easyeda-agent,
-// ~/.codex/skills/easyeda-agent). The daemon runs `skill sync` automatically on
-// startup (daemon start --auto-update-skill, on by default); these commands are
+// ~/.codex/skills/easyeda-agent and ~/.agents/skills/easyeda-agent). The daemon
+// runs `skill sync` automatically on startup (daemon start --auto-update-skill,
+// on by default); these commands are
 // the manual, self-describing surface for the same machinery.
 //
 // Scope note: this only manages the SKILL. The EasyEDA connector .eext has no
@@ -185,7 +186,7 @@ func newSkillSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&pinVersion, "version", "", "pin a release version (default: latest)")
-	c.Flags().StringSliceVar(&clients, "client", nil, "limit to clients: claude,codex (default: all present)")
+	c.Flags().StringSliceVar(&clients, "client", nil, "limit to clients: claude,codex,agents (default: all present)")
 	c.Flags().BoolVar(&preserve, "preserve", false, "keep local edits (never overwrite existing files)")
 	c.Flags().BoolVar(&force, "force", false, "sync even if the dir is already at the target version")
 	c.Flags().BoolVar(&createMissing, "create-missing", false, "install into a client dir that doesn't exist yet")

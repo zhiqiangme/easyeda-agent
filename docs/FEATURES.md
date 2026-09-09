@@ -283,8 +283,10 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
   machinery as `easyeda skill sync`). The **connector `.eext` is reported, never
   touched** — sideloads have no in-place update, so `update` prints the version
   it found in each open window plus the re-import URL. `--check` is read-only and
-  `--check --exit-code` exits **10** when anything is behind, so agents/CI can
-  gate on version drift. A **dev build is never overwritten** without `--force`
+  `--check --exit-code` exits **10** unless the installed CLI/Skill and live
+  daemon/Connector are all verifiably equal to the exact target Release, so an
+  Agent session cannot continue with ahead, dev, unknown, disconnected or stale
+  components. A **dev build is never overwritten** without `--force`
   (air rebuilds it anyway; silently replacing it would make the dev loop lie).
 
 ---

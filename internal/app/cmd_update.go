@@ -15,8 +15,8 @@ import (
 )
 
 // exitCodeUpdatesAvailable is the exit code `update --check --exit-code` uses when
-// something is behind the latest release, so CI/agents can gate on it without
-// parsing text (0 = everything current, 1 = the check itself failed).
+// the exact-version session gate is not ready, so CI/agents can gate on it
+// without parsing text (0 = exact and verified, 1 = the check itself failed).
 const exitCodeUpdatesAvailable = 10
 
 // updateReport is the JSON shape of `easyeda update` / `easyeda update --check`.
@@ -24,16 +24,20 @@ const exitCodeUpdatesAvailable = 10
 // binary, the skill dirs, and the EasyEDA connector — only the first two can be
 // updated from here (see connectorNote).
 type updateReport struct {
-	Mode       string                 `json:"mode"` // check | apply
-	CLIVersion string                 `json:"cliVersion"`
-	Latest     string                 `json:"latest,omitempty"`
-	LatestErr  string                 `json:"latestError,omitempty"`
-	Target     string                 `json:"target,omitempty"`
-	CLI        *selfupdate.CLIOutcome `json:"cli,omitempty"`
-	Skills     []updateSkillRow       `json:"skills,omitempty"`
-	Connector  *connectorReport       `json:"connector,omitempty"`
-	Behind     int                    `json:"behind"` // components behind the target
-	Notes      []string               `json:"notes,omitempty"`
+	Mode            string                 `json:"mode"` // check | apply
+	CLIVersion      string                 `json:"cliVersion"`
+	Latest          string                 `json:"latest,omitempty"`
+	LatestErr       string                 `json:"latestError,omitempty"`
+	Target          string                 `json:"target,omitempty"`
+	CLI             *selfupdate.CLIOutcome `json:"cli,omitempty"`
+	Skills          []updateSkillRow       `json:"skills,omitempty"`
+	Connector       *connectorReport       `json:"connector,omitempty"`
+	Behind          int                    `json:"behind"`          // components behind the target
+	Mismatched      int                    `json:"mismatched"`      // components at a different or unknown version
+	Unverified      int                    `json:"unverified"`      // live components that could not be checked
+	RestartRequired bool                   `json:"restartRequired"` // this process/session loaded a replaced component
+	Ready           bool                   `json:"ready"`           // exact-version session gate
+	Notes           []string               `json:"notes,omitempty"`
 }
 
 // updateSkillRow is one skill dir's before/after. In check mode only the
@@ -44,7 +48,7 @@ type updateSkillRow struct {
 	From      string `json:"from,omitempty"`      // version before this run (apply mode)
 	Installed string `json:"installed,omitempty"` // version on disk after this run
 	Present   bool   `json:"present"`
-	Status    string `json:"status"` // behind | current | not-installed | updated | created | preserved | skipped | error
+	Status    string `json:"status"` // behind | ahead | unknown | current | not-installed | updated | created | preserved | skipped | error
 	Err       string `json:"err,omitempty"`
 }
 
@@ -54,10 +58,11 @@ type updateSkillRow struct {
 type connectorReport struct {
 	DaemonRunning bool     `json:"daemonRunning"`
 	DaemonVersion string   `json:"daemonVersion,omitempty"`
+	DaemonStatus  string   `json:"daemonStatus"` // current | mismatch | unknown | not-running
 	DaemonPort    int      `json:"daemonPort,omitempty"`
 	Versions      []string `json:"versions,omitempty"` // distinct connector versions across windows
 	Windows       int      `json:"windows"`
-	Status        string   `json:"status"` // ok | behind | unknown | no-daemon | no-window
+	Status        string   `json:"status"` // ok | behind | mismatch | unknown | no-daemon | no-window
 }
 
 func newUpdateCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
@@ -76,13 +81,14 @@ func newUpdateCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	c := &cobra.Command{
 		Use:     "update",
 		Aliases: []string{"upgrade", "self-update"},
-		Short:   "Update the easyeda CLI binary and the installed skill dirs to the latest release",
+		Short:   "Update CLI/Skills and verify the exact latest runtime versions",
 		Long: `Bring this installation up to the latest GitHub release.
 
 Covers the two pieces that CAN be updated programmatically:
   • the easyeda CLI binary itself (downloaded for this platform, sha256-verified
     when the release publishes checksums.txt, then atomically swapped in place)
-  • the easyeda-agent skill dirs (~/.claude/skills, ~/.codex/skills)
+  • the easyeda-agent skill dirs (~/.claude/skills, ~/.codex/skills,
+    and the shared ~/.agents/skills root used by Codex Desktop)
 
 The EasyEDA connector .eext is only REPORTED: a sideloaded extension has no
 in-place auto-update, so a stale connector has to be re-imported by hand
@@ -93,7 +99,7 @@ If the binary lives in a root-owned dir, re-run with sudo.`,
 		Args: cobra.NoArgs,
 		Example: `  easyeda update                    # CLI + skills → latest
   easyeda update --check            # report only, change nothing
-  easyeda update --check --exit-code  # exit 10 when something is behind
+  easyeda update --check --exit-code  # exit 10 unless the exact-version session gate is ready
   easyeda update --version 0.25.0   # pin a release
   easyeda update --skill-only       # leave the binary alone
   easyeda update --json`,
@@ -203,6 +209,9 @@ If the binary lives in a root-owned dir, re-run with sudo.`,
 			}
 
 			rep.Behind = countBehind(rep)
+			rep.Mismatched, rep.Unverified = countVersionGateProblems(rep)
+			rep.RestartRequired = updateRequiresRestart(rep)
+			rep.Ready = rep.Behind == 0 && rep.Mismatched == 0 && rep.Unverified == 0 && !rep.RestartRequired
 			rep.Notes = updateNotes(rep)
 			if !cliOnly && rep.CLI != nil && rep.CLI.Status == "error" {
 				rep.Notes = append(rep.Notes, "Skill update skipped because the CLI update failed.")
@@ -216,19 +225,19 @@ If the binary lives in a root-owned dir, re-run with sudo.`,
 			if operationFailed {
 				return errQuiet
 			}
-			if checkOnly && exitCode && rep.Behind > 0 {
+			if checkOnly && exitCode && !rep.Ready {
 				return exitCodeError{code: exitCodeUpdatesAvailable}
 			}
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&checkOnly, "check", false, "report what is behind, change nothing")
+	c.Flags().BoolVar(&checkOnly, "check", false, "verify exact target versions without changing anything")
 	c.Flags().BoolVar(&exitCode, "exit-code", false,
-		fmt.Sprintf("with --check: exit %d when something is behind the target", exitCodeUpdatesAvailable))
+		fmt.Sprintf("with --check: exit %d unless every installed/live component is verified at the exact target", exitCodeUpdatesAvailable))
 	c.Flags().StringVar(&pinVersion, "version", "", "pin a release version (default: latest)")
 	c.Flags().BoolVar(&cliOnly, "cli-only", false, "update only the CLI binary")
 	c.Flags().BoolVar(&skillOnly, "skill-only", false, "update only the skill dirs")
-	c.Flags().StringSliceVar(&clients, "client", nil, "limit skill sync to clients: claude,codex (default: all present)")
+	c.Flags().StringSliceVar(&clients, "client", nil, "limit skill sync to clients: claude,codex,agents (default: all present)")
 	c.Flags().BoolVar(&preserve, "preserve", false, "skill sync: keep local edits (never overwrite existing files)")
 	c.Flags().BoolVar(&force, "force", false, "overwrite a dev build / re-install even when already at the target")
 	c.Flags().BoolVar(&createMissing, "create-missing", false, "install the skill into a client dir that doesn't exist yet")
@@ -272,8 +281,12 @@ func checkSkills(target string, clients []string) []updateSkillRow {
 		switch {
 		case !t.Present:
 			row.Status = "not-installed"
+		case selfupdate.SemverCore(t.Installed) == "":
+			row.Status = "unknown"
 		case selfupdate.SemverLess(t.Installed, target):
 			row.Status = "behind"
+		case selfupdate.SemverCore(t.Installed) != target:
+			row.Status = "ahead"
 		default:
 			row.Status = "current"
 		}
@@ -286,7 +299,7 @@ func checkSkills(target string, clients []string) []updateSkillRow {
 // in each open EasyEDA window. Purely informational: never fails the command,
 // and a missing daemon is a normal answer, not an error.
 func probeConnector(cfg *appConfig, target string) *connectorReport {
-	rep := &connectorReport{Status: "no-daemon"}
+	rep := &connectorReport{Status: "no-daemon", DaemonStatus: "not-running"}
 	portStart, portEnd, err := cfg.portRange()
 	if err != nil {
 		return rep
@@ -305,10 +318,19 @@ func probeConnector(cfg *appConfig, target string) *connectorReport {
 		Windows []healthWindow `json:"windows"`
 	}
 	if err := json.Unmarshal(scan.Found.Raw, &parsed); err != nil {
+		rep.DaemonStatus = "unknown"
 		rep.Status = "unknown"
 		return rep
 	}
 	rep.DaemonVersion = parsed.Version
+	switch core := selfupdate.SemverCore(parsed.Version); {
+	case core == "":
+		rep.DaemonStatus = "unknown"
+	case core == target:
+		rep.DaemonStatus = "current"
+	default:
+		rep.DaemonStatus = "mismatch"
+	}
 	rep.Windows = len(parsed.Windows)
 	if len(parsed.Windows) == 0 {
 		rep.Status = "no-window"
@@ -316,7 +338,7 @@ func probeConnector(cfg *appConfig, target string) *connectorReport {
 	}
 
 	seen := map[string]bool{}
-	behind, unknown := false, false
+	behind, mismatch, unknown := false, false, false
 	for _, w := range parsed.Windows {
 		v := strings.TrimSpace(w.ConnectorVersion)
 		if v == "" {
@@ -332,12 +354,16 @@ func probeConnector(cfg *appConfig, target string) *connectorReport {
 			unknown = true
 		case selfupdate.SemverLess(v, target):
 			behind = true
+		case selfupdate.SemverCore(v) != target:
+			mismatch = true
 		}
 	}
 	sort.Strings(rep.Versions)
 	switch {
 	case behind:
 		rep.Status = "behind"
+	case mismatch:
+		rep.Status = "mismatch"
 	case unknown:
 		rep.Status = "unknown"
 	default:
@@ -346,9 +372,8 @@ func probeConnector(cfg *appConfig, target string) *connectorReport {
 	return rep
 }
 
-// countBehind counts components still behind the target after this run — what
-// --exit-code gates on. The connector counts too: it is the one piece a user
-// must fix by hand, so a green exit must not hide it.
+// countBehind preserves the directional part of the report. The stronger
+// --exit-code gate also considers mismatch and unverifiable live state below.
 func countBehind(rep updateReport) int {
 	n := 0
 	if rep.CLI != nil {
@@ -370,22 +395,68 @@ func countBehind(rep updateReport) int {
 	return n
 }
 
+// countVersionGateProblems enforces the stronger agent-session invariant:
+// every installed component and every live runtime must be provably equal to
+// the selected GitHub release. "Ahead", dev builds and unknown live state are
+// not safe substitutes for an exact match because their interfaces may differ.
+func countVersionGateProblems(rep updateReport) (mismatched, unverified int) {
+	if rep.CLI != nil && (rep.CLI.Status == "ahead" || rep.CLI.Status == "skipped") {
+		mismatched++
+	}
+	for _, s := range rep.Skills {
+		if s.Present && (s.Status == "ahead" || s.Status == "unknown") {
+			mismatched++
+		}
+	}
+	if c := rep.Connector; c != nil {
+		switch c.DaemonStatus {
+		case "mismatch":
+			mismatched++
+		case "unknown", "not-running", "":
+			unverified++
+		}
+		switch c.Status {
+		case "mismatch":
+			mismatched++
+		case "unknown", "no-daemon", "no-window":
+			unverified++
+		}
+	}
+	return mismatched, unverified
+}
+
+func updateRequiresRestart(rep updateReport) bool {
+	if rep.CLI != nil && rep.CLI.Status == "updated" {
+		return true
+	}
+	for _, s := range rep.Skills {
+		if s.Status == "updated" || s.Status == "created" {
+			return true
+		}
+	}
+	return false
+}
+
 // updateNotes turns the report into the handful of actionable lines a user needs
 // after an update: restart the daemon, re-import the connector, install skills.
 func updateNotes(rep updateReport) []string {
 	var notes []string
-	if rep.CLI != nil && rep.CLI.Status == "updated" && rep.Connector != nil && rep.Connector.DaemonRunning {
-		notes = append(notes, "daemon is still running the OLD binary — restart it to pick up v"+rep.Target+
+	if rep.Connector != nil && rep.Connector.DaemonStatus == "mismatch" {
+		notes = append(notes, "daemon is still running a DIFFERENT binary — restart it with v"+rep.Target+
 			" (stop the current `easyeda daemon start`, then start it again)")
 	}
-	if rep.Connector != nil && rep.Connector.Status == "behind" {
+	if rep.Connector != nil && (rep.Connector.Status == "behind" || rep.Connector.Status == "mismatch") {
 		notes = append(notes, fmt.Sprintf(
-			"connector %s is behind v%s and cannot be updated from here — re-import the .eext "+
+			"connector %s does not exactly match v%s and cannot be updated from here — re-import the .eext "+
 				"(https://github.com/%s/releases/download/v%s/easyeda-agent-connector.eext), "+
 				"then fully quit and relaunch EasyEDA so open windows load it",
 			strings.Join(rep.Connector.Versions, ","), rep.Target, selfupdate.RepoSlug, rep.Target))
 	}
+	skillChanged := false
 	for _, s := range rep.Skills {
+		if s.Status == "updated" || s.Status == "created" {
+			skillChanged = true
+		}
 		if s.Status == "preserved" {
 			notes = append(notes, fmt.Sprintf("skill %s kept local content and its previous version marker; release parity is not claimed", s.Client))
 		}
@@ -395,6 +466,9 @@ func updateNotes(rep updateReport) []string {
 		if s.Status == "skipped" && s.Err != "" {
 			notes = append(notes, fmt.Sprintf("skill %s skipped (%s) — `easyeda update --create-missing` to install it", s.Client, s.Err))
 		}
+	}
+	if skillChanged || (rep.CLI != nil && rep.CLI.Status == "updated") {
+		notes = append(notes, "this process/session has loaded a component that was just replaced — stop this task and start a new session for the agent; do not continue EDA work in this session")
 	}
 	return notes
 }
@@ -450,6 +524,7 @@ func printUpdateReport(w io.Writer, rep updateReport) {
 		row("skill:"+s.Client, s.Status, ver, where)
 	}
 	if c := rep.Connector; c != nil {
+		row("daemon", c.DaemonStatus, trimV(c.DaemonVersion), fmt.Sprintf("port :%d", c.DaemonPort))
 		ver, where := "—", ""
 		switch c.Status {
 		case "no-daemon":
@@ -464,10 +539,11 @@ func printUpdateReport(w io.Writer, rep updateReport) {
 	}
 
 	fmt.Fprintln(w)
-	if rep.Behind == 0 {
-		fmt.Fprintf(w, "→ nothing behind v%s\n", rep.Target)
+	if rep.Ready {
+		fmt.Fprintf(w, "→ READY: every installed/live component is verified at exactly v%s\n", rep.Target)
 	} else {
-		fmt.Fprintf(w, "→ %d component(s) behind v%s\n", rep.Behind, rep.Target)
+		fmt.Fprintf(w, "→ BLOCKED: behind=%d mismatched=%d unverified=%d restart-required=%t (required: exact v%s)\n",
+			rep.Behind, rep.Mismatched, rep.Unverified, rep.RestartRequired, rep.Target)
 	}
 	for _, n := range rep.Notes {
 		fmt.Fprintf(w, "  ! %s\n", n)

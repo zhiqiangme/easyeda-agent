@@ -17,9 +17,27 @@ metadata:
 
 ## 开始工作
 
+### 强制会话版本门禁
+
+每个新 Agent 会话必须先运行 `easyeda update --check --exit-code`。这是本 Skill 的第一条
+命令，先于项目读取、离线规划、`health` 和任何 EDA action。该命令查询 GitHub latest
+Release，并且只有以下状态全部可验证且**精确等于 latest** 时才返回 0：当前 CLI、已安装的
+当前客户端 Skill、正在运行的 daemon、所有已连接 EasyEDA 窗口里的 Connector。
+`ahead`、开发构建、版本未知、daemon 未运行、没有连接器窗口都不是通过。
+
+门禁非 0 时立即停止当前 EDA 任务，按 [environment-setup.md](references/environment-setup.md)
+完成升级：CLI 或 Skill 不符先运行 `easyeda update`；daemon 不符则用新 CLI 重启；Connector
+不符则安装命令打印的同一 Release `.eext`，完全退出并重开 EasyEDA。不得用固定旧
+`--version`、`--preserve`、`--skip-version-check` 或仅看 `health` 绕过 latest 门禁。
+
+**只要 CLI、Skill、daemon 或 Connector 发生过升级/替换，本会话不得继续，也不得在本会话
+内把重新检查当作放行。明确要求用户关闭当前 Agent 会话并新开会话，从本节第一条命令重新
+开始。** 这是因为当前会话已经载入旧 Skill；重启 daemon 或 EasyEDA 不能刷新 Agent 指令。
+
+门禁返回 0 后：
+
 1. 按用户任务选择下表中的流程，只加载相关参考。已有项目的小修复沿用已确认的需求和授权。
-2. 首次写入前运行 `easyeda update --check --exit-code` 核对三方版本，再运行
-   `easyeda health` 确认工程、活动页和连接器；版本不齐时按环境说明升级后继续。
+2. 运行 `easyeda health` 确认工程、活动页和连接器。
 3. 手动命令用 `--project <project>` 指定工程；变更带 `--doc <page>`，操作已有页面。
    已生成的受保护 Apply 队列沿用其固定目标，不再用名称覆盖。
    先读取将要修改的器件、引脚、网络及几何；位号或 primitiveId 不明确时不能盲写。

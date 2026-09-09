@@ -47,6 +47,7 @@ else:
 ''')
         curl.chmod(0o755)
         self.env = {**os.environ, 'PATH': f'{self.shims}:/usr/bin:/bin',
+                    'HOME': str(self.root),
                     'EASYEDA_VERSION': 'v1.4.2', 'EASYEDA_INSTALL_DIR': str(self.root / 'bin'),
                     'CODEX_HOME': str(self.root / 'codex config'),
                     'CLAUDE_CONFIG_DIR': str(self.root / 'claude config'),
@@ -99,6 +100,13 @@ else:
                                 env={**self.env, 'PATH': f'{self.cli.parent}:/usr/bin:/bin'}, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [str(self.cli), 'easyeda-agent v1.4.2'])
+
+    def test_shared_agents_skill_root(self):
+        result = self.run_install(EASYEDA_INSTALL_SKILLS='agents')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        path = self.root / '.agents/skills/easyeda-agent'
+        self.assertEqual((path / '.version').read_text(), '1.4.2\n')
+        self.assertTrue((path / 'references/guide.md').is_file())
 
     def test_normal_upgrade_removes_retired_files(self):
         self.old_install()

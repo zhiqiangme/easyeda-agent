@@ -1,5 +1,5 @@
 // Package selfupdate keeps the locally-installed easyeda-agent skill directories
-// (~/.claude/skills/easyeda-agent, ~/.codex/skills/easyeda-agent) in sync with a
+// (~/.claude, ~/.codex and the shared ~/.agents skill roots) in sync with a
 // released version, so a user upgrading the CLI never has to hand-copy the skill.
 //
 // It deliberately does NOT touch the EasyEDA connector .eext: sideloaded
@@ -38,7 +38,7 @@ const (
 )
 
 // clientOrder is the deterministic client iteration order.
-var clientOrder = []string{"claude", "codex"}
+var clientOrder = []string{"claude", "codex", "agents"}
 
 // Endpoint builders, overridable in tests to point at an httptest server.
 var (
@@ -52,7 +52,7 @@ var (
 
 // SkillTarget is one installed (or installable) skill location.
 type SkillTarget struct {
-	Client    string `json:"client"`    // "claude" | "codex"
+	Client    string `json:"client"`    // "claude" | "codex" | "agents"
 	Dir       string `json:"dir"`       // absolute skill dir
 	Present   bool   `json:"present"`   // dir exists on disk
 	Installed string `json:"installed"` // version marker, "" if unknown/missing
@@ -76,6 +76,8 @@ func skillDir(client string) string {
 		if base == "" {
 			base = filepath.Join(home, ".codex")
 		}
+	case "agents":
+		base = filepath.Join(home, ".agents")
 	default:
 		return ""
 	}
@@ -92,8 +94,8 @@ func ValidateClients(clients []string) error {
 		clients = clientOrder
 	}
 	for _, client := range clients {
-		if client != "codex" && client != "claude" {
-			return fmt.Errorf("unknown skill client %q (want codex or claude)", client)
+		if client != "codex" && client != "claude" && client != "agents" {
+			return fmt.Errorf("unknown skill client %q (want codex, claude, or agents)", client)
 		}
 		if skillDir(client) == "" {
 			return fmt.Errorf("invalid %s client home: CODEX_HOME/CLAUDE_CONFIG_DIR and user home must be absolute paths", client)

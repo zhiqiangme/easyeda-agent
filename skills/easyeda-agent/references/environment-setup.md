@@ -16,10 +16,23 @@ easyeda update --check
 easyeda update
 ```
 
-`update --check` 只读，`--check --exit-code` 在有组件落后时返回 10；普通 `update`
-更新 CLI 与已安装的 Skill，不能安装或替换编辑器里的连接器。需要安装缺失的客户端
+`update --check` 只读；`--check --exit-code` 是 Agent 会话硬门，只有 CLI、已安装的
+客户端 Skill、运行中的 daemon 和所有已连接 Connector 都可验证且精确等于 GitHub
+latest 时返回 0。任何落后、超前、开发构建、未知或未连接状态都返回 10；查询 latest
+本身失败返回 1。普通 `update` 更新 CLI 与已安装的 Skill，不能安装或替换编辑器里的连接器。需要安装缺失的客户端
 Skill 时用 `--create-missing`，保留本地 Skill 修改用 `--preserve`，固定发布版用
 `--version <version>`。更新二进制后还需让 daemon 使用新二进制启动。
+
+版本门禁的恢复顺序固定：
+
+1. 运行不带 `--version` 的 `easyeda update`，把 CLI 和已安装 Skill 升到 latest。会话门禁
+   不使用 `--preserve`，因为保留混合内容不能证明 Skill 与 Release 一致。
+2. 停止旧 daemon，用升级后的 `easyeda daemon start` 重启。
+3. 若 Connector 不同版，从 `update` 输出的 GitHub Release 地址取得同版 `.eext`；在扩展
+   管理器卸载旧侧载项、导入新包，然后完全退出并重开 EasyEDA。市场版若尚未同步 latest，
+   也改用该 Release 侧载包，不能降级其余组件迁就市场版本。
+4. **结束当前 Agent 会话并新开会话。** 新会话重新运行 `easyeda update --check --exit-code`；
+   只有输出 `READY` 且退出 0 才可继续。当前会话已经载入旧 Skill，禁止升级后原地继续。
 
 在另一台机器或新的终端验证时，固定 Release 版本并使用独立目录，先检查
 `easyeda --version`、`easyeda sch compose --help`、`easyeda blocks ls --json`。
@@ -84,8 +97,9 @@ easyeda doc switch "<doc-name-or-uuid>" --project "<project>"
 
 - 没有 daemon：检查当前安装路径与启动日志；开发环境恢复现有 `make dev`。
 - daemon 正常但 `windows` 为空：检查编辑器、登录态、扩展启用和外部交互权限。
-- 已连接：核对目标工程/文档、连接器版本及 `versionGate`。按 findings 的修复建议处理
-  版本错位；`--skip-version-check` 不是常规升级或恢复方法。
+- 已连接：核对目标工程/文档、连接器版本及 `versionGate`。`health` 只验证当前 CLI 与
+  连接器的兼容关系，不能代替 GitHub latest 会话门禁。按 findings 的修复建议处理版本错位；
+  `--skip-version-check` 不是常规升级或恢复方法。
 - 写操作使用 `--project` 和 `--doc`，由 CLI 在派发前实时确认目标文档。没有独立的
   `easyeda context` 命令；`health` 显示连接状态，`doc ls/switch` 读取/切换实时文档。
 

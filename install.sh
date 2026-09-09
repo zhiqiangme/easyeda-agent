@@ -5,7 +5,7 @@ set -euo pipefail
 
 REPO="zhoushoujianwork/easyeda-agent"
 SKILL_NAME="easyeda-agent"
-# EASYEDA_INSTALL_SKILLS: ""|auto (detect), "none" (skip), or CSV of codex,claude
+# EASYEDA_INSTALL_SKILLS: ""|auto (detect), "none" (skip), or CSV of codex,claude,agents
 INSTALL_SKILLS="${EASYEDA_INSTALL_SKILLS:-}"
 # EASYEDA_SKILL_PRESERVE=1 keeps existing files instead of clean-replacing
 SKILL_PRESERVE="${EASYEDA_SKILL_PRESERVE:-0}"
@@ -155,9 +155,10 @@ ACTUAL_VERSION=$("$TMP/binary" --version) || fatal "Downloaded binary cannot run
 [ "$ACTUAL_VERSION" = "easyeda-agent $VERSION" ] \
   || fatal "Downloaded binary version differs: $ACTUAL_VERSION; expected $VERSION"
 
-# ── install skills (Codex + Claude Code) ──────────────────────────────────────
+# ── install skills (Codex + Claude Code + shared Agent root) ──────────────────
 # Resolve which clients to install for.
-# codex → ~/.codex/skills/easyeda-agent, claude → ~/.claude/skills/easyeda-agent
+# codex → ~/.codex/skills/easyeda-agent, claude → ~/.claude/skills/easyeda-agent,
+# agents → ~/.agents/skills/easyeda-agent (Codex Desktop shared skill root)
 detect_targets() {
   # Explicit "none" → skip entirely.
   case "$INSTALL_SKILLS" in
@@ -165,7 +166,7 @@ detect_targets() {
   esac
 
   if [ -n "$INSTALL_SKILLS" ] && [ "$INSTALL_SKILLS" != "auto" ]; then
-    # Explicit CSV list (e.g. "codex,claude").
+    # Explicit CSV list (e.g. "codex,claude,agents").
     printf '%s\n' "$INSTALL_SKILLS" | tr ',' '\n' | while IFS= read -r t; do
       t=$(printf '%s' "$t" | tr -d '[:space:]')
       [ -n "$t" ] && printf '%s\n' "$t"
@@ -181,6 +182,9 @@ detect_targets() {
   if [ -d "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}" ] || command -v claude >/dev/null 2>&1; then
     printf 'claude\n'; found=1
   fi
+  if [ -d "${HOME}/.agents" ]; then
+    printf 'agents\n'; found=1
+  fi
   # Neither detected → create both by default so the skill is ready when a
   # client shows up. EASYEDA_INSTALL_SKILLS=none opts out.
   if [ "$found" = 0 ]; then
@@ -195,6 +199,7 @@ client_base_dir() {
   case "$1" in
     codex)  printf '%s/skills\n' "${CODEX_HOME:-${HOME}/.codex}" ;;
     claude) printf '%s/skills\n' "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}" ;;
+    agents) printf '%s/skills\n' "${HOME}/.agents" ;;
     *)      return 1 ;;
   esac
 }
@@ -300,7 +305,7 @@ printf '           keep auto-updating in place, no action needed)\n\n'
 printf '  3. In EasyEDA Pro: 设置 → 允许外部交互 (Allow external interaction)\n\n'
 printf '  4. Use the skill in your AI client:\n'
 printf '       /easyeda-agent       (schematic + PCB workflow)\n'
-printf '       Installed for detected clients: Codex (~/.codex/skills) and/or Claude Code (~/.claude/skills)\n\n'
+printf '       Installed for detected clients: Codex (~/.codex/skills), Codex Desktop shared (~/.agents/skills), and/or Claude Code (~/.claude/skills)\n\n'
 printf 'Upgrading later? No need to re-run this script:\n'
 printf '       easyeda update           # CLI binary + skill dirs → latest\n'
 printf '       easyeda update --check   # report only (cli / skill / connector)\n'

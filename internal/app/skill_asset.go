@@ -45,7 +45,7 @@ type skillAsset struct {
 //  1. explicit (the --flag) — used if it exists, hard error if it doesn't (a typo
 //     must not silently fall through to some other copy);
 //  2. $EASYEDA_SKILLS_DIR/<skill>/… — the deployment override;
-//  3. the INSTALLED skill dirs (~/.claude/skills/easyeda-agent/…, ~/.codex/…),
+//  3. the INSTALLED skill dirs (~/.claude/…, ~/.codex/…, ~/.agents/…),
 //     resolved via selfupdate.Targets so this never drifts from `easyeda skill
 //     status` / `skill sync`;
 //  4. skills/ walked up from the running binary (dev: ./bin/easyeda in the repo);

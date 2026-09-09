@@ -75,6 +75,25 @@ func TestCheckSkillsReadsVersionMarkers(t *testing.T) {
 	}
 }
 
+func TestCheckSkillsRequiresExactVersion(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	codex := filepath.Join(home, ".codex", "skills", "easyeda-agent")
+	if err := os.MkdirAll(codex, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codex, ".version"), []byte("0.27.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rows := checkSkills("0.26.0", []string{"codex"})
+	if len(rows) != 1 || rows[0].Status != "ahead" {
+		t.Fatalf("a non-target Skill must not be reported current: %+v", rows)
+	}
+}
+
 func TestCountBehindCountsConnectorButNotDevSkip(t *testing.T) {
 	rep := updateReport{
 		CLI:       &selfupdate.CLIOutcome{Status: "skipped"},
@@ -92,7 +111,8 @@ func TestUpdateNotesSurfaceConnectorAndDaemonRestart(t *testing.T) {
 	rep := updateReport{
 		Target:    "0.26.0",
 		CLI:       &selfupdate.CLIOutcome{Status: "updated"},
-		Connector: &connectorReport{DaemonRunning: true, Status: "behind", Versions: []string{"0.25.1"}},
+		Connector: &connectorReport{DaemonRunning: true, DaemonStatus: "mismatch", Status: "behind", Versions: []string{"0.25.1"}},
+		Skills:    []updateSkillRow{{Client: "codex", Status: "updated"}},
 	}
 	notes := strings.Join(updateNotes(rep), "\n")
 	if !strings.Contains(notes, "restart") {
@@ -100,6 +120,9 @@ func TestUpdateNotesSurfaceConnectorAndDaemonRestart(t *testing.T) {
 	}
 	if !strings.Contains(notes, ".eext") {
 		t.Errorf("a stale connector note must point at the .eext re-import: %q", notes)
+	}
+	if !strings.Contains(notes, "new session") {
+		t.Errorf("an updated Skill must force a new agent session: %q", notes)
 	}
 }
 
@@ -138,13 +161,56 @@ func TestProbeConnectorFlagsStaleConnector(t *testing.T) {
 	if rep.DaemonVersion != "v0.26.0" || rep.Windows != 2 {
 		t.Errorf("unexpected daemon report: %+v", rep)
 	}
+	if rep.DaemonStatus != "current" {
+		t.Errorf("daemon status=%q want current", rep.DaemonStatus)
+	}
+}
+
+func TestVersionGateBlocksMismatchedDaemonAndAheadConnector(t *testing.T) {
+	host, port := fakeDaemon(t, `{"service":"easyeda-agent","version":"v0.25.0","status":"ok",
+	  "windows":[{"windowId":"w1","connectorVersion":"0.27.0"}]}`)
+	cfg := &appConfig{host: host, ports: fmt.Sprintf("%d-%d", port, port)}
+	rep := updateReport{
+		Target:    "0.26.0",
+		CLI:       &selfupdate.CLIOutcome{Status: "up-to-date"},
+		Skills:    []updateSkillRow{{Present: true, Installed: "0.26.0", Status: "current"}},
+		Connector: probeConnector(cfg, "0.26.0"),
+	}
+	rep.Behind = countBehind(rep)
+	rep.Mismatched, rep.Unverified = countVersionGateProblems(rep)
+	rep.Ready = rep.Behind == 0 && rep.Mismatched == 0 && rep.Unverified == 0
+	if rep.Ready || rep.Mismatched != 2 {
+		t.Fatalf("daemon and connector exact-version drift must block: %+v", rep)
+	}
+}
+
+func TestVersionGateReadyOnlyForExactVerifiedRuntime(t *testing.T) {
+	rep := updateReport{
+		Target: "0.26.0",
+		CLI:    &selfupdate.CLIOutcome{Status: "up-to-date"},
+		Skills: []updateSkillRow{{Present: true, Installed: "0.26.0", Status: "current"}},
+		Connector: &connectorReport{
+			DaemonRunning: true,
+			DaemonVersion: "v0.26.0",
+			DaemonStatus:  "current",
+			Versions:      []string{"0.26.0"},
+			Windows:       1,
+			Status:        "ok",
+		},
+	}
+	rep.Behind = countBehind(rep)
+	rep.Mismatched, rep.Unverified = countVersionGateProblems(rep)
+	rep.Ready = rep.Behind == 0 && rep.Mismatched == 0 && rep.Unverified == 0
+	if !rep.Ready {
+		t.Fatalf("exact verified runtime should pass: %+v", rep)
+	}
 }
 
 func TestProbeConnectorNoDaemonIsNotAnError(t *testing.T) {
 	// A closed port range: probing must degrade to "no-daemon", never fail.
 	cfg := &appConfig{host: "127.0.0.1", ports: "1-1"}
 	rep := probeConnector(cfg, "0.26.0")
-	if rep.Status != "no-daemon" || rep.DaemonRunning {
+	if rep.Status != "no-daemon" || rep.DaemonStatus != "not-running" || rep.DaemonRunning {
 		t.Errorf("unexpected report with no daemon: %+v", rep)
 	}
 }
