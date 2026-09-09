@@ -94,7 +94,7 @@ func TestCheckSkillsRequiresExactVersion(t *testing.T) {
 	}
 }
 
-func TestCountBehindCountsConnectorButNotDevSkip(t *testing.T) {
+func TestCountBehindCountsIncompatibleConnectorButNotDevSkip(t *testing.T) {
 	rep := updateReport{
 		CLI:       &selfupdate.CLIOutcome{Status: "skipped"},
 		Skills:    []updateSkillRow{{Status: "behind"}, {Status: "current"}, {Status: "not-installed"}},
@@ -166,6 +166,30 @@ func TestProbeConnectorFlagsStaleConnector(t *testing.T) {
 	}
 }
 
+func TestProbeConnectorAcceptsPatchDriftWithinCompatibilityLine(t *testing.T) {
+	host, port := fakeDaemon(t, `{"service":"easyeda-agent","version":"v1.4.8","status":"ok",
+	  "windows":[{"windowId":"w1","connectorVersion":"1.4.6"},{"windowId":"w2","connectorVersion":"1.4.8"}]}`)
+	cfg := &appConfig{host: host, ports: fmt.Sprintf("%d-%d", port, port)}
+
+	rep := probeConnector(cfg, "1.4.8")
+	if rep.Status != "compatible" {
+		t.Fatalf("status=%q want compatible for same major.minor patch drift: %+v", rep.Status, rep)
+	}
+	gate := updateReport{
+		Target: "1.4.8", CLI: &selfupdate.CLIOutcome{Status: "up-to-date"},
+		Skills: []updateSkillRow{{Present: true, Installed: "1.4.8", Status: "current"}}, Connector: rep,
+	}
+	gate.Behind = countBehind(gate)
+	gate.Mismatched, gate.Unverified = countVersionGateProblems(gate)
+	gate.Ready = gate.Behind == 0 && gate.Mismatched == 0 && gate.Unverified == 0
+	if !gate.Ready {
+		t.Fatalf("same-major.minor connector must pass latest gate: %+v", gate)
+	}
+	if notes := strings.Join(updateNotes(gate), "\n"); strings.Contains(notes, ".eext") {
+		t.Fatalf("patch drift must not request connector upgrade: %q", notes)
+	}
+}
+
 func TestVersionGateBlocksMismatchedDaemonAndAheadConnector(t *testing.T) {
 	host, port := fakeDaemon(t, `{"service":"easyeda-agent","version":"v0.25.0","status":"ok",
 	  "windows":[{"windowId":"w1","connectorVersion":"0.27.0"}]}`)
@@ -180,7 +204,7 @@ func TestVersionGateBlocksMismatchedDaemonAndAheadConnector(t *testing.T) {
 	rep.Mismatched, rep.Unverified = countVersionGateProblems(rep)
 	rep.Ready = rep.Behind == 0 && rep.Mismatched == 0 && rep.Unverified == 0
 	if rep.Ready || rep.Mismatched != 2 {
-		t.Fatalf("daemon and connector exact-version drift must block: %+v", rep)
+		t.Fatalf("daemon exact drift and connector minor drift must block: %+v", rep)
 	}
 }
 

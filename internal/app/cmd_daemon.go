@@ -56,8 +56,9 @@ Skill auto-update (--auto-update-skill, on by default) keeps your installed
 easyeda-agent skill dirs (CLAUDE_CONFIG_DIR / CODEX_HOME, default ~/.claude / ~/.codex) in sync with this daemon's release on
 startup, so you never hand-copy the skill after a CLI upgrade. It touches only
 dirs that already exist, honors EASYEDA_SKILL_PRESERVE=1, and logs each change.
-The EasyEDA connector .eext has no sideload auto-update (marketplace-only), so a
-stale connector is only DETECTED and logged with a re-import notice — not swapped.
+The EasyEDA connector .eext has no sideload auto-update (marketplace-only).
+Patch drift is compatible; a connector behind the daemon's major.minor line is
+only DETECTED and logged with a re-import notice — not swapped.
 
 The daemon binds a SINGLE fixed port (60832, the start of --ports) and never
 spills to the next one — so at most one daemon ever runs and the connector always

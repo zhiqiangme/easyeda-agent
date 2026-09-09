@@ -35,6 +35,7 @@ args = sys.argv[1:]
 url = next(a for a in args if a.startswith('https://'))
 name = url.rsplit('/', 1)[-1]
 if os.environ.get('FAIL_ASSET') == name: sys.exit(22)
+if os.environ.get('FAIL_PRIMARY_ASSET') == name and url.startswith('https://github.com/'): sys.exit(18)
 output = pathlib.Path(args[args.index('-o')+1])
 source = pathlib.Path(os.environ['FIXTURE_ASSETS']) / name
 if source.exists():
@@ -107,6 +108,13 @@ else:
         path = self.root / '.agents/skills/easyeda-agent'
         self.assertEqual((path / '.version').read_text(), '1.4.2\n')
         self.assertTrue((path / 'references/guide.md').is_file())
+
+    def test_large_asset_falls_back_to_checksum_verified_proxy(self):
+        result = self.run_install(FAIL_PRIMARY_ASSET=self.binary_name,
+                                  EASYEDA_GITHUB_PROXY='https://mirror.example/{url}')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('checksum-verified mirror', result.stdout)
+        self.assertEqual(self.cli.read_text(), (self.assets / self.binary_name).read_text())
 
     def test_normal_upgrade_removes_retired_files(self):
         self.old_install()

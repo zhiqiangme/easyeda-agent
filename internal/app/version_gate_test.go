@@ -147,10 +147,10 @@ func TestEvaluateVersionGateConnectorGrading(t *testing.T) {
 		conn    string
 		wantSev string
 	}{
-		// The marketplace channel structurally lags (no publish API), so a patch
-		// behind is the steady state for most users — warn, never block.
-		{"patch behind warns", "v1.1.1", "1.1.0", versionSevWarn},
-		{"patch ahead warns", "v1.1.0", "1.1.1", versionSevWarn},
+		// Patch releases contain no connector runtime changes. Marketplace lag
+		// within the same compatibility line is fully supported.
+		{"patch behind is compatible", "v1.1.1", "1.1.0", versionSevOK},
+		{"patch ahead is compatible", "v1.1.0", "1.1.1", versionSevOK},
 		{"minor behind blocks", "v1.2.0", "1.1.0", versionSevBlock},
 		{"major behind blocks", "v2.0.0", "1.9.9", versionSevBlock},
 		{"same version ok", "v1.1.1", "1.1.1", versionSevOK},
@@ -244,15 +244,14 @@ func TestRunVersionGateRefusesStaleDaemon(t *testing.T) {
 	}
 }
 
-func TestRunVersionGateWarnsButProceedsOnConnectorPatch(t *testing.T) {
+func TestRunVersionGateSilentlyAcceptsConnectorPatch(t *testing.T) {
 	withCLIVersion(t, "v1.1.1")
 	var stderr bytes.Buffer
 	if err := runVersionGate(&appConfig{}, healthBody("1.1.1", "1.1.0"), &stderr); err != nil {
 		t.Fatalf("connector patch drift must not block: %v", err)
 	}
-	out := stderr.String()
-	if !strings.Contains(out, "connector") || !strings.Contains(out, "完全退出并重启 EasyEDA") {
-		t.Fatalf("expected an actionable connector warning, got:\n%s", out)
+	if stderr.Len() != 0 {
+		t.Fatalf("compatible connector patch drift must be silent, got:\n%s", stderr.String())
 	}
 }
 

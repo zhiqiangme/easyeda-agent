@@ -15,8 +15,8 @@ import (
 )
 
 // exitCodeUpdatesAvailable is the exit code `update --check --exit-code` uses when
-// the exact-version session gate is not ready, so CI/agents can gate on it
-// without parsing text (0 = exact and verified, 1 = the check itself failed).
+// the release-compatibility session gate is not ready, so CI/agents can gate on
+// it without parsing text (0 = verified and compatible, 1 = check failure).
 const exitCodeUpdatesAvailable = 10
 
 // updateReport is the JSON shape of `easyeda update` / `easyeda update --check`.
@@ -36,7 +36,7 @@ type updateReport struct {
 	Mismatched      int                    `json:"mismatched"`      // components at a different or unknown version
 	Unverified      int                    `json:"unverified"`      // live components that could not be checked
 	RestartRequired bool                   `json:"restartRequired"` // this process/session loaded a replaced component
-	Ready           bool                   `json:"ready"`           // exact-version session gate
+	Ready           bool                   `json:"ready"`           // exact CLI/Skill/daemon + compatible connector
 	Notes           []string               `json:"notes,omitempty"`
 }
 
@@ -62,7 +62,7 @@ type connectorReport struct {
 	DaemonPort    int      `json:"daemonPort,omitempty"`
 	Versions      []string `json:"versions,omitempty"` // distinct connector versions across windows
 	Windows       int      `json:"windows"`
-	Status        string   `json:"status"` // ok | behind | mismatch | unknown | no-daemon | no-window
+	Status        string   `json:"status"` // ok | compatible | behind | mismatch | unknown | no-daemon | no-window
 }
 
 func newUpdateCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
@@ -81,7 +81,7 @@ func newUpdateCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	c := &cobra.Command{
 		Use:     "update",
 		Aliases: []string{"upgrade", "self-update"},
-		Short:   "Update CLI/Skills and verify the exact latest runtime versions",
+		Short:   "Update CLI/Skills and verify the latest compatible runtime set",
 		Long: `Bring this installation up to the latest GitHub release.
 
 Covers the two pieces that CAN be updated programmatically:
@@ -99,7 +99,7 @@ If the binary lives in a root-owned dir, re-run with sudo.`,
 		Args: cobra.NoArgs,
 		Example: `  easyeda update                    # CLI + skills → latest
   easyeda update --check            # report only, change nothing
-  easyeda update --check --exit-code  # exit 10 unless the exact-version session gate is ready
+  easyeda update --check --exit-code  # exit 10 unless the release-compatibility gate is ready
   easyeda update --version 0.25.0   # pin a release
   easyeda update --skill-only       # leave the binary alone
   easyeda update --json`,
@@ -231,9 +231,9 @@ If the binary lives in a root-owned dir, re-run with sudo.`,
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&checkOnly, "check", false, "verify exact target versions without changing anything")
+	c.Flags().BoolVar(&checkOnly, "check", false, "verify target versions and connector compatibility without changing anything")
 	c.Flags().BoolVar(&exitCode, "exit-code", false,
-		fmt.Sprintf("with --check: exit %d unless every installed/live component is verified at the exact target", exitCodeUpdatesAvailable))
+		fmt.Sprintf("with --check: exit %d unless CLI/Skills/daemon are exact and connectors share target major.minor", exitCodeUpdatesAvailable))
 	c.Flags().StringVar(&pinVersion, "version", "", "pin a release version (default: latest)")
 	c.Flags().BoolVar(&cliOnly, "cli-only", false, "update only the CLI binary")
 	c.Flags().BoolVar(&skillOnly, "skill-only", false, "update only the skill dirs")
@@ -338,7 +338,7 @@ func probeConnector(cfg *appConfig, target string) *connectorReport {
 	}
 
 	seen := map[string]bool{}
-	behind, mismatch, unknown := false, false, false
+	behind, mismatch, compatible, unknown := false, false, false, false
 	for _, w := range parsed.Windows {
 		v := strings.TrimSpace(w.ConnectorVersion)
 		if v == "" {
@@ -349,12 +349,19 @@ func probeConnector(cfg *appConfig, target string) *connectorReport {
 			seen[v] = true
 			rep.Versions = append(rep.Versions, v)
 		}
+		core := selfupdate.SemverCore(v)
 		switch {
-		case selfupdate.SemverCore(v) == "":
+		case core == "":
 			unknown = true
+		case core == target:
+			// Exact connector release.
+		case sameMajorMinor(core, target):
+			// Patch releases do not change the connector runtime. Marketplace
+			// distribution may legitimately lag within this compatibility line.
+			compatible = true
 		case selfupdate.SemverLess(v, target):
 			behind = true
-		case selfupdate.SemverCore(v) != target:
+		default:
 			mismatch = true
 		}
 	}
@@ -366,6 +373,8 @@ func probeConnector(cfg *appConfig, target string) *connectorReport {
 		rep.Status = "mismatch"
 	case unknown:
 		rep.Status = "unknown"
+	case compatible:
+		rep.Status = "compatible"
 	default:
 		rep.Status = "ok"
 	}
@@ -395,10 +404,10 @@ func countBehind(rep updateReport) int {
 	return n
 }
 
-// countVersionGateProblems enforces the stronger agent-session invariant:
-// every installed component and every live runtime must be provably equal to
-// the selected GitHub release. "Ahead", dev builds and unknown live state are
-// not safe substitutes for an exact match because their interfaces may differ.
+// countVersionGateProblems enforces the agent-session invariant: CLI, Skill and
+// daemon must equal the selected GitHub release. Connectors need only share its
+// major.minor line because patch releases contain no connector runtime changes.
+// "Ahead", dev builds and unknown live state are not safe substitutes.
 func countVersionGateProblems(rep updateReport) (mismatched, unverified int) {
 	if rep.CLI != nil && (rep.CLI.Status == "ahead" || rep.CLI.Status == "skipped") {
 		mismatched++
@@ -447,7 +456,7 @@ func updateNotes(rep updateReport) []string {
 	}
 	if rep.Connector != nil && (rep.Connector.Status == "behind" || rep.Connector.Status == "mismatch") {
 		notes = append(notes, fmt.Sprintf(
-			"connector %s does not exactly match v%s and cannot be updated from here — re-import the .eext "+
+			"connector %s is not compatible with the v%s major.minor line and cannot be updated from here — re-import the .eext "+
 				"(https://github.com/%s/releases/download/v%s/easyeda-agent-connector.eext), "+
 				"then fully quit and relaunch EasyEDA so open windows load it",
 			strings.Join(rep.Connector.Versions, ","), rep.Target, selfupdate.RepoSlug, rep.Target))
@@ -531,6 +540,9 @@ func printUpdateReport(w io.Writer, rep updateReport) {
 			where = "daemon not running — start it to read the connector version"
 		case "no-window":
 			where = fmt.Sprintf("daemon %s on :%d, no EasyEDA window connected", orDash(c.DaemonVersion), c.DaemonPort)
+		case "compatible":
+			ver = strings.Join(c.Versions, ",")
+			where = fmt.Sprintf("%d window(s), same major.minor; marketplace patch update not required", c.Windows)
 		default:
 			ver = strings.Join(c.Versions, ",")
 			where = fmt.Sprintf("%d window(s), manual .eext re-import only", c.Windows)
@@ -540,9 +552,9 @@ func printUpdateReport(w io.Writer, rep updateReport) {
 
 	fmt.Fprintln(w)
 	if rep.Ready {
-		fmt.Fprintf(w, "→ READY: every installed/live component is verified at exactly v%s\n", rep.Target)
+		fmt.Fprintf(w, "→ READY: CLI/Skills/daemon are exactly v%s; connector major.minor is compatible\n", rep.Target)
 	} else {
-		fmt.Fprintf(w, "→ BLOCKED: behind=%d mismatched=%d unverified=%d restart-required=%t (required: exact v%s)\n",
+		fmt.Fprintf(w, "→ BLOCKED: behind=%d mismatched=%d unverified=%d restart-required=%t (required: exact CLI/Skills/daemon v%s + compatible connector major.minor)\n",
 			rep.Behind, rep.Mismatched, rep.Unverified, rep.RestartRequired, rep.Target)
 	}
 	for _, n := range rep.Notes {

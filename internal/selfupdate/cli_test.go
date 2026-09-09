@@ -142,7 +142,49 @@ func TestUpdateCLIWithoutChecksumsStillUpdates(t *testing.T) {
 	}
 }
 
+func TestUpdateCLIFallsBackToChecksumVerifiedMirror(t *testing.T) {
+	asset, err := AssetName(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		t.Skip(err)
+	}
+	body := "MIRROR-BINARY"
+	sum := sha256.Sum256([]byte(body))
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "partial upstream", http.StatusBadGateway)
+	}))
+	defer primary.Close()
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, body)
+	}))
+	defer mirror.Close()
+	sums := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, "%x  %s\n", sum, asset)
+	}))
+	defer sums.Close()
+	oldBin, oldSums := binaryURL, checksumsURL
+	binaryURL = func(string, string) string { return primary.URL + "/binary" }
+	checksumsURL = func(string) string { return sums.URL }
+	t.Cleanup(func() { binaryURL, checksumsURL = oldBin, oldSums })
+	t.Setenv(GitHubProxyEnv, mirror.URL+"/{url}")
+	stubVerify(t, nil)
+	path := installedBinary(t, "OLD")
+
+	out, err := UpdateCLI(context.Background(), CLIOptions{
+		TargetVersion: "0.26.0", CurrentVersion: "v0.25.1", Path: path,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "updated" || out.Source != "mirror" || out.Checksum != "verified" {
+		t.Fatalf("unexpected mirror outcome: %+v", out)
+	}
+	if got, _ := os.ReadFile(path); string(got) != body {
+		t.Fatalf("installed %q, want mirror body", got)
+	}
+}
+
 func TestUpdateCLIChecksumMismatchKeepsOldBinary(t *testing.T) {
+	t.Setenv(GitHubProxyEnv, "off")
 	updateServer(t, "0.26.0", "NEW-BINARY", true)
 	// Serve a different body than the one the checksum was computed over by
 	// re-pointing binaryURL only.

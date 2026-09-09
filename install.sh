@@ -167,9 +167,37 @@ verify_asset() {
   [ "$_want" = "$_got" ] || fatal "checksum mismatch for $_name; nothing installed"
   ok "sha256 verified: $_name"
 }
+
+download_release_asset() {
+  _name="$1"; _dest="$2"; _primary="${BASE_URL}/${_name}"
+  _attempt=1
+  while [ "$_attempt" -le 3 ]; do
+    if curl -fsSL --connect-timeout 15 --max-time 300 "$_primary" -o "$_dest"; then
+      return 0
+    fi
+    warn "GitHub download attempt ${_attempt}/3 failed for ${_name}"
+    rm -f "$_dest"
+    _attempt=$((_attempt + 1))
+  done
+
+  # A third-party transport is trusted only for availability. The expected
+  # digest must already have come directly from GitHub.
+  [ "$SUM_CODE" = 200 ] || fatal "GitHub download failed and no trusted checksum is available; mirror fallback refused"
+  _proxy="${EASYEDA_GITHUB_PROXY-https://gh-proxy.com/}"
+  case "$_proxy" in
+    ''|off|OFF|Off) fatal "download failed: ${_primary} (mirror fallback disabled)" ;;
+  esac
+  case "$_proxy" in
+    *'{url}'*) _mirror=${_proxy//\{url\}/$_primary} ;;
+    *) _mirror="${_proxy%/}/${_primary}" ;;
+  esac
+  warn "GitHub failed; trying checksum-verified mirror for ${_name}"
+  curl -fsSL --connect-timeout 15 --max-time 300 "$_mirror" -o "$_dest" \
+    || fatal "GitHub and mirror downloads both failed for ${_name}"
+}
+
 info "Downloading ${BINARY_NAME}..."
-curl -fsSL --connect-timeout 15 --max-time 300 "${BASE_URL}/${BINARY_NAME}" -o "$TMP/binary" \
-  || fatal "download failed: ${BASE_URL}/${BINARY_NAME}"
+download_release_asset "$BINARY_NAME" "$TMP/binary"
 verify_asset "$BINARY_NAME" "$TMP/binary"
 chmod 0755 "$TMP/binary"
 ACTUAL_VERSION=$("$TMP/binary" --version) || fatal "Downloaded binary cannot run on this host; nothing installed"
@@ -282,8 +310,7 @@ if [ -z "$TARGETS" ]; then
   info "Skill install skipped (EASYEDA_INSTALL_SKILLS=none)"
 else
   info "Downloading skills.tar.gz..."
-  curl -fsSL --connect-timeout 15 --max-time 300 "${BASE_URL}/skills.tar.gz" -o "$TMP/skills.tar.gz" \
-    || fatal "Skill download failed; nothing installed"
+  download_release_asset "skills.tar.gz" "$TMP/skills.tar.gz"
   verify_asset "skills.tar.gz" "$TMP/skills.tar.gz"
   tar -xzf "$TMP/skills.tar.gz" -C "$TMP" || fatal "Invalid Skill archive; nothing installed"
   SRC_SKILL="$TMP/$SKILL_NAME"
@@ -316,7 +343,7 @@ printf 'Next steps:\n'
 printf '  1. Start the daemon:\n'
 printf '       easyeda daemon start\n\n'
 printf '  2. Install the EasyEDA connector extension (either channel):\n'
-printf '     a) Sideload this release (strictly CLI-version-locked, recommended):\n'
+printf '     a) Sideload this release (same major.minor compatibility line):\n'
 printf '          Download: %s/easyeda-agent-connector.eext\n' "$BASE_URL"
 printf '          In EasyEDA Pro: 扩展管理 → 导入扩展 → select the .eext file\n'
 printf '     b) 立创官方插件市场 (one-click, auto-updates in place; may lag the CLI):\n'
@@ -330,5 +357,5 @@ printf '       Installed for detected clients: Codex (~/.codex/skills), Codex De
 printf 'Upgrading later? No need to re-run this script:\n'
 printf '       easyeda update           # CLI binary + skill dirs → latest\n'
 printf '       easyeda update --check   # report only (cli / skill / connector)\n'
-printf '     (the connector .eext still needs a manual re-import — `update` prints the URL)\n\n'
+printf '     (connector patch drift is compatible; re-import only when `update` reports a major/minor mismatch)\n\n'
 printf 'Full docs: https://github.com/%s\n' "$REPO"

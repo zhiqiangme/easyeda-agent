@@ -38,6 +38,14 @@ var (
 	}
 )
 
+const (
+	// DefaultGitHubProxy is used only after GitHub itself fails and only when
+	// the asset can be checked against a GitHub-sourced SHA-256 manifest.
+	DefaultGitHubProxy = "https://gh-proxy.com/"
+	// GitHubProxyEnv overrides the proxy prefix; "off" disables the fallback.
+	GitHubProxyEnv = "EASYEDA_GITHUB_PROXY"
+)
+
 // verifyBinary runs the freshly-downloaded binary and checks it reports the
 // expected version — the strongest cheap integrity check we have, and it also
 // catches a truncated download or an HTML error page saved as a binary.
@@ -112,6 +120,7 @@ type CLIOutcome struct {
 	Status   string `json:"status"` // updated | up-to-date | skipped | error
 	Reason   string `json:"reason,omitempty"`
 	Checksum string `json:"checksum,omitempty"` // verified | unavailable
+	Source   string `json:"source,omitempty"`   // github | mirror
 }
 
 // UpdateCLI downloads the target release binary for this platform and atomically
@@ -181,32 +190,36 @@ func UpdateCLI(ctx context.Context, opts CLIOptions, logf func(string, ...any)) 
 		mode = fi.Mode().Perm() | 0o111
 	}
 
+	want, checksumErr := fetchChecksum(ctx, target, asset)
+	legacyNoChecksum := errors.Is(checksumErr, errChecksumUnavailable)
+	if checksumErr != nil && !legacyNoChecksum {
+		out.Status = "error"
+		out.Reason = checksumErr.Error()
+		return out, fmt.Errorf("verify checksum for %s: %w", asset, checksumErr)
+	}
+	if legacyNoChecksum {
+		out.Checksum = "unavailable"
+		log("update: checksum unavailable (%v) — mirror fallback disabled; using run-and-verify", checksumErr)
+	} else {
+		out.Checksum = "verified"
+	}
+
 	log("update: downloading %s v%s", asset, target)
-	tmp, sum, err := downloadTo(ctx, binaryURL(target, asset), dir, mode)
+	tmp, sum, source, err := downloadToWithFallback(ctx, binaryURL(target, asset), dir, mode, want, !legacyNoChecksum, log)
 	if err != nil {
 		out.Status = "error"
 		out.Reason = err.Error()
 		return out, fmt.Errorf("download %s v%s: %w", asset, target, err)
 	}
+	out.Source = source
 	defer os.Remove(tmp) // no-op once the rename succeeds
 
-	// Checksum verification is best-effort: checksums.txt only exists on
-	// releases built after it was added, so a missing file must not block an
-	// upgrade from an older release.
-	switch want, err := fetchChecksum(ctx, target, asset); {
-	case errors.Is(err, errChecksumUnavailable):
-		out.Checksum = "unavailable"
-		log("update: checksum unavailable (%v) — falling back to a run-and-verify check", err)
-	case err != nil:
-		out.Status = "error"
-		out.Reason = err.Error()
-		return out, fmt.Errorf("verify checksum for %s: %w", asset, err)
-	case !strings.EqualFold(want, sum):
+	if !legacyNoChecksum && !strings.EqualFold(want, sum) {
 		out.Status = "error"
 		out.Reason = fmt.Sprintf("checksum mismatch: want %s, got %s", want, sum)
 		return out, fmt.Errorf("checksum mismatch for %s v%s (want %s, got %s)", asset, target, want, sum)
-	default:
-		out.Checksum = "verified"
+	}
+	if !legacyNoChecksum {
 		log("update: sha256 verified")
 	}
 
@@ -287,6 +300,57 @@ func downloadTo(ctx context.Context, url, dir string, mode os.FileMode) (path, s
 		return "", "", err
 	}
 	return tmp, hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func downloadToWithFallback(ctx context.Context, primary, dir string, mode os.FileMode, expected string, allowMirror bool, logf func(string, ...any)) (path, sum, source string, err error) {
+	var primaryErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		path, sum, primaryErr = downloadTo(ctx, primary, dir, mode)
+		if primaryErr == nil && (expected == "" || strings.EqualFold(expected, sum)) {
+			return path, sum, "github", nil
+		}
+		if primaryErr == nil {
+			_ = os.Remove(path)
+			primaryErr = fmt.Errorf("checksum mismatch from GitHub: want %s, got %s", expected, sum)
+		}
+		if logf != nil {
+			logf("update: GitHub download attempt %d/3 failed: %v", attempt, primaryErr)
+		}
+	}
+	if !allowMirror {
+		return "", "", "", primaryErr
+	}
+	mirror := githubProxyURL(primary)
+	if mirror == "" {
+		return "", "", "", primaryErr
+	}
+	if logf != nil {
+		logf("update: GitHub failed; trying checksum-verified mirror %s", mirror)
+	}
+	path, sum, err = downloadTo(ctx, mirror, dir, mode)
+	if err != nil {
+		return "", "", "", fmt.Errorf("GitHub download failed (%v); mirror failed: %w", primaryErr, err)
+	}
+	if expected != "" && !strings.EqualFold(expected, sum) {
+		_ = os.Remove(path)
+		return "", "", "", fmt.Errorf("GitHub download failed (%v); mirror checksum mismatch: want %s, got %s", primaryErr, expected, sum)
+	}
+	return path, sum, "mirror", nil
+}
+
+func githubProxyURL(primary string) string {
+	prefix, ok := os.LookupEnv(GitHubProxyEnv)
+	if !ok {
+		prefix = DefaultGitHubProxy
+	}
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" || strings.EqualFold(prefix, "off") {
+		return ""
+	}
+	if strings.Contains(prefix, "{url}") {
+		return strings.ReplaceAll(prefix, "{url}", primary)
+	}
+	return strings.TrimRight(prefix, "/") + "/" + primary
 }
 
 var errChecksumUnavailable = errors.New("release has no checksums.txt (HTTP 404)")

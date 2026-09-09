@@ -5,8 +5,9 @@
 
 ## 安装与升级
 
-CLI/daemon、`easyeda-agent` Skill 和 EDA Agent Connector 是三个必须同版的组成部分；
-EasyEDA Pro 是宿主，不参与项目版本号对齐。
+CLI/daemon、`easyeda-agent` Skill 和 EDA Agent Connector 是三个配套组成部分；CLI、daemon
+与 Skill 必须精确同版，Connector 按 major.minor 兼容线对齐。EasyEDA Pro 是宿主，不参与
+项目版本号对齐。
 
 发布版安装 CLI 和 Skill：
 
@@ -17,21 +18,27 @@ easyeda update
 ```
 
 `update --check` 只读；`--check --exit-code` 是 Agent 会话硬门，只有 CLI、已安装的
-客户端 Skill、运行中的 daemon 和所有已连接 Connector 都可验证且精确等于 GitHub
-latest 时返回 0。任何落后、超前、开发构建、未知或未连接状态都返回 10；查询 latest
+客户端 Skill、运行中的 daemon 可验证且精确等于 GitHub latest，并且所有已连接 Connector
+与 latest 共享 major.minor 兼容线时返回 0。Connector 仅差 patch 可直接通过；其余组件的
+任何落后、超前、开发构建、未知或未连接状态，以及 Connector 跨 minor/major，都返回 10；查询 latest
 本身失败返回 1。latest 查询会使用 `GH_TOKEN` / `GITHUB_TOKEN`，API 匿名额度耗尽时回退
 到公开 Release 重定向。普通 `update` 更新 CLI 与已安装的 Skill，不能安装或替换编辑器里的连接器。需要安装缺失的客户端
 Skill 时用 `--create-missing`，保留本地 Skill 修改用 `--preserve`，固定发布版用
 `--version <version>`。更新二进制后还需让 daemon 使用新二进制启动。
+
+GitHub Release 大资产连续三次失败时，CLI/安装器默认尝试 `https://gh-proxy.com/`；只有
+先从 GitHub 主源取得该 Release 的 `checksums.txt` 才允许镜像回退，下载后仍按主源
+SHA-256 校验。`EASYEDA_GITHUB_PROXY=https://mirror.example/{url}` 可替换传输镜像，设为
+`off` 可禁用。不要把镜像提供的 checksum 当信任依据。
 
 版本门禁的恢复顺序固定：
 
 1. 运行不带 `--version` 的 `easyeda update`，把 CLI 和已安装 Skill 升到 latest。会话门禁
    不使用 `--preserve`，因为保留混合内容不能证明 Skill 与 Release 一致。
 2. 停止旧 daemon，用升级后的 `easyeda daemon start` 重启。
-3. 若 Connector 不同版，从 `update` 输出的 GitHub Release 地址取得同版 `.eext`；在扩展
-   管理器卸载旧侧载项、导入新包，然后完全退出并重开 EasyEDA。市场版若尚未同步 latest，
-   也改用该 Release 侧载包，不能降级其余组件迁就市场版本。
+3. 纯 patch 更新时保留现有 Connector，不升级插件市场版本，也不重开 EasyEDA。仅当
+   Connector 与 latest 跨 minor/major 不兼容时，从 `update` 输出的 GitHub Release 地址取得
+   对应 `.eext`；在扩展管理器卸载旧侧载项、导入新包，然后完全退出并重开 EasyEDA。
 4. **结束当前 Agent 会话并新开会话。** 新会话重新运行 `easyeda update --check --exit-code`；
    只有输出 `READY` 且退出 0 才可继续。当前会话已经载入旧 Skill，禁止升级后原地继续。
 
@@ -66,8 +73,8 @@ Node 版本遵循 bundle 的要求（至少 20.17）。
 
 | 渠道 | 安装/升级方法 |
 |---|---|
-| GitHub Release `.eext` 侧载 | 下载与 CLI 对应的包，在 EasyEDA 扩展管理器卸载旧项，再导入新包。平台按 UUID 去重，侧载没有自动更新。 |
-| [立创插件市场](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector) | 在市场安装，平台支持原地自动更新；市场版本可能落后于发布版，按 health 的版本检查处理。 |
+| GitHub Release `.eext` 侧载 | 跨 minor/major 时下载与 CLI 兼容线对应的包，在 EasyEDA 扩展管理器卸载旧项，再导入新包。平台按 UUID 去重，侧载没有自动更新。 |
+| [立创插件市场](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector) | 在市场安装，平台支持原地自动更新；市场版本可落后 patch，只要 major.minor 相同就无需处理。 |
 
 开发连接器：`make connector` 按当前版本/UUID 构建，`make eext` 升 patch 后构建同 UUID
 安装包。更换连接器后保存文档，完全退出并重开 EasyEDA，让所有旧页面运行时停止。

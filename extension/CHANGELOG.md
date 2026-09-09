@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [1.4.8] — 2026-09-10
+
+### Fixed
+
+- Keep the strict latest-release session gate for CLI, installed Skill and running daemon, while accepting Connector patch drift within the same major.minor compatibility line. Patch-only upgrades no longer ask users to update the plugin marketplace Connector or relaunch EasyEDA; cross-minor/major Connector drift still blocks with the sideload and full-relaunch recovery steps.
+- Retry GitHub release assets up to three times, then use a configurable `gh-proxy.com` transport fallback only when `checksums.txt` was obtained directly from GitHub. Mirror-delivered CLI and Skill archives remain subject to the GitHub-published SHA-256 digest; `EASYEDA_GITHUB_PROXY=off` disables fallback.
+
+### Validation
+
+- Go update/runtime/daemon version-gate tests and installer regressions pass, including same-minor Connector compatibility, cross-minor refusal, primary-download failure, mirror fallback and checksum enforcement.
+
 ## [1.4.7] — 2026-09-10
 
 ### Fixed

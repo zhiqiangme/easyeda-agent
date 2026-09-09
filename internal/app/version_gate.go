@@ -17,7 +17,7 @@ import (
 
 // ── 版本一致性门 (issue #181 复盘第 2 条) ──────────────────────────────────
 //
-// 用户实测:CLI v1.1.1 而 daemon/connector 还是 v1.1.0,行为不一致 —— 而且
+// 用户实测:CLI 已升级而 daemon 仍跑旧构建,行为不一致 —— 而且
 // 「明明修过的 bug 又复现」会把**后续每一条排查都染上噪音**,一轮排查白烧。
 // 所以这条不是提示级别的问题,是「先把地基对齐再谈别的」。
 //
@@ -34,11 +34,11 @@ import (
 //     「老进程没重启」这一种意外。修复代价近乎零(air 自己会重启 / 换个终端),
 //     漏判代价却是整轮排查的噪音 —— 所以宁可拦。
 //
-//   connector:major/minor 不一致 → **拒绝**;仅 patch 不一致 → **显著警告**。
+//   connector:major/minor 不一致 → **拒绝**;仅 patch 不一致 → **通过**。
 //     它走的是**另一条分发渠道**:插件市场没有发布 API,每次发版靠人工重投,
 //     所以「市场版落后 CLI 一点」是多数用户的**常态**(CLAUDE.md 明确记着这条)。
 //     修复代价也高得多 —— 卸载 → 重导入 → **完全退出重启 EasyEDA**,还可能丢
-//     未存盘的编辑。对常态化的 patch 落后一律拒绝 = 工具对多数人不可用;而
+//     未存盘的编辑。patch 发布按约定不含连接器 runtime 改动,因此同 minor 直接兼容;而
 //     minor 以上落后意味着连接器可能**根本没有**这版 CLI 要调的 handler,
 //     那种"静默走偏"比打断更贵。
 //
@@ -134,9 +134,9 @@ func daemonFinding(cli, daemon string) versionFinding {
 }
 
 // connectorFinding grades the CLI ↔ connector pair: major/minor drift blocks
-// (the connector may simply not have the handler this CLI calls), patch drift
-// warns loudly (the marketplace channel structurally lags, and the fix costs a
-// full EasyEDA relaunch).
+// (the connector may simply not have the handler this CLI calls), while patch
+// drift is compatible by release policy (patches contain no connector runtime
+// changes and the marketplace channel structurally lags).
 func connectorFinding(cli, connector string) versionFinding {
 	f := versionFinding{Component: "connector", Version: strings.TrimSpace(connector)}
 	cliCore, connCore := selfupdate.SemverCore(cli), selfupdate.SemverCore(connector)
@@ -149,10 +149,9 @@ func connectorFinding(cli, connector string) versionFinding {
 		f.Severity = versionSevOK
 		f.Reason = fmt.Sprintf("与 CLI 同版 %s", display(cli))
 	case sameMajorMinor(cliCore, connCore):
-		f.Severity = versionSevWarn
-		f.Reason = fmt.Sprintf("CLI %s ≠ connector %s(仅差 patch)—— 插件市场渠道本就滞后,多半能用,但一旦行为对不上先怀疑这里",
+		f.Severity = versionSevOK
+		f.Reason = fmt.Sprintf("CLI %s 与 connector %s 同属 major.minor 兼容线;patch 发布不要求升级插件市场版本",
 			display(cli), display(connector))
-		f.Fix = fixConnectorStale
 	default:
 		f.Severity = versionSevBlock
 		f.Reason = fmt.Sprintf("CLI %s ≠ connector %s(差 minor 及以上)—— 连接器可能根本没有这版 CLI 要调的 handler,动作会静默走偏",
@@ -169,12 +168,12 @@ const fixDaemonStale = `重启 daemon(它跑的是启动那一刻的构建):
     不需要你先去 kill。
 确认:` + "`easyeda health`" + ` 的 version 应与 ` + "`easyeda version`" + ` 一致。`
 
-const fixConnectorStale = `重装连接器 .eext(同版才严格对齐):
-  1. 下载同版 .eext:https://github.com/` + versionGateRepoSlug + `/releases/latest
+const fixConnectorStale = `重装连接器 .eext(跨 major/minor 兼容线时需要):
+  1. 下载 latest .eext:https://github.com/` + versionGateRepoSlug + `/releases/latest
   2. EasyEDA「扩展管理 → 已安装」**先卸载旧的**(uuid 相同,不卸载直接导入会静默失败)
   3. 导入新的 .eext
   4. **完全退出并重启 EasyEDA** —— 重导入不会重载已开窗口,旧窗口会继续跑旧代码并抢 daemon
-  (插件市场版可原地自动更新但**滞后**于 CLI;要严格同版走 GitHub Release。)`
+  (插件市场版可原地自动更新但可能滞后;同 major.minor 的 patch 差异无需处理。)`
 
 // versionGateRepoSlug is the GitHub owner/repo shipping the connector .eext.
 const versionGateRepoSlug = "zhoushoujianwork/easyeda-agent"
@@ -398,7 +397,7 @@ func versionGateSummary(rep versionGateReport) string {
 	case versionSevWarn:
 		return "⚠ 版本一致性:有落后组件(不拦)—— 见 versionGate.findings[].fix"
 	case versionSevOK:
-		return "✓ 版本一致性:CLI / daemon / connector 对齐 " + display(rep.CLI)
+		return "✓ 版本一致性:CLI / daemon 同版,connector major.minor 兼容 " + display(rep.CLI)
 	default:
 		return "· 版本一致性:未判定(dev 构建或无连接器上报版本)"
 	}

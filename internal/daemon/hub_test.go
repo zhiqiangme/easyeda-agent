@@ -189,6 +189,7 @@ func TestConnectorVersionOK(t *testing.T) {
 	}{
 		{"0.5.5", "v0.5.5", "0.5.5", boolp(true)},
 		{"v0.5.5", "0.5.5", "0.5.5", boolp(true)},
+		{"0.5.4", "v0.5.5", "0.5.5", boolp(true)}, // patch drift is compatible
 		{"0.1.0", "0.5.5", "0.5.5", boolp(false)}, // stale vs daemon
 		{"dev", "0.5.5", "0.5.5", nil},            // non-semver connector → no verdict
 		{"0.5.5", "dev", "0.5.5", nil},            // dev daemon, leads peers → no verdict
@@ -220,7 +221,7 @@ func TestStaleConnectorNotice(t *testing.T) {
 		t.Errorf("notice should name both versions: %q", note)
 	}
 	// Up to date / ahead → no notice.
-	for _, c := range [][2]string{{"0.9.0", "v0.9.0"}, {"0.10.0", "v0.9.0"}} {
+	for _, c := range [][2]string{{"0.9.0", "v0.9.0"}, {"0.9.1", "v0.9.0"}, {"0.8.3", "v0.8.9"}, {"0.10.0", "v0.9.0"}} {
 		if note := staleConnectorNotice(c[0], c[1]); note != "" {
 			t.Errorf("staleConnectorNotice(%q,%q) should be empty, got %q", c[0], c[1], note)
 		}

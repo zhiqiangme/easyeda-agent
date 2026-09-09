@@ -5,14 +5,15 @@ license: MIT
 compatibility: "Requires the local easyeda CLI/daemon and EasyEDA Agent Connector with Allow external interaction enabled. Python 3 is used by bundled helpers; online library lookup and updates need network access."
 metadata:
   author: zhoushoujianwork
-  version: "1.4.7"
+  version: "1.4.8"
   homepage: "https://github.com/zhoushoujianwork/easyeda-agent"
 ---
 
 # EasyEDA Agent
 
 用 typed CLI 经 WebSocket 调用 EasyEDA Pro 官方 `eda.*` API。CLI/daemon、此 Skill 和
-连接器是必须同版的三个组成部分；EasyEDA Pro 是宿主。安装、升级或连接异常时读
+连接器是配套组成部分；CLI/daemon 与 Skill 必须同版，连接器按 major.minor 兼容线对齐。
+EasyEDA Pro 是宿主。安装、升级或连接异常时读
 [environment-setup.md](references/environment-setup.md)。
 
 ## 开始工作
@@ -21,13 +22,15 @@ metadata:
 
 每个新 Agent 会话必须先运行 `easyeda update --check --exit-code`。这是本 Skill 的第一条
 命令，先于项目读取、离线规划、`health` 和任何 EDA action。该命令查询 GitHub latest
-Release，并且只有以下状态全部可验证且**精确等于 latest** 时才返回 0：当前 CLI、已安装的
-当前客户端 Skill、正在运行的 daemon、所有已连接 EasyEDA 窗口里的 Connector。
-`ahead`、开发构建、版本未知、daemon 未运行、没有连接器窗口都不是通过。
+Release；当前 CLI、已安装的当前客户端 Skill、正在运行的 daemon 必须可验证且**精确等于
+latest**，所有已连接 EasyEDA 窗口里的 Connector 必须与 latest 共享 `major.minor` 兼容线，
+才返回 0。Connector 仅有 patch 差异属于正常兼容，不要求升级插件市场版本。`ahead`、开发
+构建、版本未知、daemon 未运行、没有连接器窗口，以及 Connector 跨 minor/major 都不是通过。
 
 门禁非 0 时立即停止当前 EDA 任务，按 [environment-setup.md](references/environment-setup.md)
-完成升级：CLI 或 Skill 不符先运行 `easyeda update`；daemon 不符则用新 CLI 重启；Connector
-不符则安装命令打印的同一 Release `.eext`，完全退出并重开 EasyEDA。不得用固定旧
+完成升级：CLI 或 Skill 不符先运行 `easyeda update`；daemon 不符则用新 CLI 重启；仅当
+Connector 跨 minor/major 不兼容时，安装命令打印的同一兼容线 `.eext`，完全退出并重开
+EasyEDA。纯 patch 更新不升级 Connector，也不要求重开 EasyEDA。不得用固定旧
 `--version`、`--preserve`、`--skip-version-check` 或仅看 `health` 绕过 latest 门禁。
 
 **只要 CLI、Skill、daemon 或 Connector 发生过升级/替换，本会话不得继续，也不得在本会话

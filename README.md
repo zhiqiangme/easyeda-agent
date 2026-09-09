@@ -90,11 +90,11 @@ USB-HUB…这些电路的**内部拓扑是死的**,每次重画等于重趟坑�
 > 与常见卡点速查,一页讲清。下面是精简版。
 
 easyeda-agent 有三个必须配套的组成部分:CLI/daemon、连接器 `.eext` 插件和
-`easyeda-agent` Skill；EasyEDA Pro 是运行它们的宿主,需开启「允许外部交互」。**升级时
-三方(CLI + 连接器 + Skill)要一起升到同一版本**,否则 `easyeda daemon health` 会把
-落后的连接器标成 stale。
+`easyeda-agent` Skill；EasyEDA Pro 是运行它们的宿主,需开启「允许外部交互」。升级时
+CLI、Skill 与运行中的 daemon 必须精确等于 latest；Connector 只在跨 major/minor 兼容线时
+升级，同一兼容线里的市场版 patch 滞后不影响使用。
 
-先装 `easyeda` CLI/daemon,再装 EasyEDA 连接器 —— 两条通道任选:安装器会打印**与 CLI 严格同版**的 GitHub Release `.eext` 下载地址,或从[**立创官方插件市场**](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)一键安装(平台可原地自动更新,但市场版本可能滞后 CLI,严格三方同版时以 Release `.eext` 为准):
+先装 `easyeda` CLI/daemon,再装 EasyEDA 连接器 —— 两条通道任选:安装器会打印 GitHub Release `.eext` 下载地址,或从[**立创官方插件市场**](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)一键安装。CLI/daemon 与 Skill 精确同版；Connector 只需 major.minor 相同，市场版仅落后 patch 时无需升级:
 
 > **ℹ️ 插件更名说明(2026-08)**:应市场管理规范要求,插件**显示名**改为
 > **EDA Agent Connector**(不再含 "easyeda" 字样)。经与市场管理员确认,内部包名
@@ -112,11 +112,17 @@ curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main
 ```bash
 easyeda update              # CLI 二进制(sha256 校验 + 原子替换)+ skill 目录 → latest
 easyeda update --check      # 只读:cli / skill / connector 三方版本对齐表
-easyeda update --check --exit-code   # 非精确 latest 或运行态不可验证则退出 10
+easyeda update --check --exit-code   # CLI/Skill/daemon 非 latest 或 Connector 跨兼容线则退出 10
 easyeda update --version <x.y.z>     # 钉版本;--skill-only / --cli-only 缩范围
 ```
 
-连接器 `.eext` 不在自动升级范围内(侧载无原地更新)—— `update` 会**报出**它落后并打印重导地址。
+GitHub 大资产连续三次下载失败时，安装器和 `easyeda update` 会尝试
+`https://gh-proxy.com/` 传输，但只在已从 GitHub 取得 `checksums.txt` 时启用，并仍按该
+SHA-256 校验。可用 `EASYEDA_GITHUB_PROXY=https://your-mirror/{url}` 换镜像，或设为 `off`
+禁用；镜像只负责可用性，不是供应链信任根。
+
+连接器 `.eext` 不在自动升级范围内(侧载无原地更新)—— 同 major.minor 的 patch 差异直接兼容；
+只有跨 minor/major 时 `update` 才会阻断并打印重导地址。
 dev 构建(git-describe 版本号)默认不覆盖,`--force` 才强升;二进制在 root 目录时用 `sudo easyeda update`。
 
 可用环境变量控制 skill 安装:
@@ -161,14 +167,15 @@ EDA，避免直接从截图猜接或在页面上反复试摆：
 ```text
 请使用 easyeda-agent 完成 EasyEDA Pro 任务。
 
-开始前先确认三个组成部分处于同一发布版本：
+开始前先确认三个组成部分处于兼容的发布版本：
 1. easyeda CLI/daemon
 2. easyeda-agent Skill
 3. EDA Agent Connector 插件
 
 把 easyeda update --check --exit-code 作为当前会话第一条命令。只有 CLI、Skill、运行中
-daemon 和所有已连接 Connector 都可验证且精确等于 GitHub latest 时继续。否则运行
-easyeda update，重启 daemon；Connector 不同版时安装命令所示同一 GitHub Release 的
+daemon 可验证且精确等于 GitHub latest，且所有 Connector 与 latest 同 major.minor 时继续。
+否则运行 easyeda update 并重启 daemon；纯 patch 更新保留现有 Connector，不重开 EasyEDA。
+仅当 Connector 跨 minor/major 时安装命令所示 GitHub Release 的
 easyeda-agent-connector.eext，保存文档并完全退出、重开 EasyEDA。任何组件升级后立即结束
 当前 Agent 会话并新开会话，从版本检查重新开始。确认已开启“允许外部交互”，再运行
 easyeda health 核对目标工程、页面和版本。

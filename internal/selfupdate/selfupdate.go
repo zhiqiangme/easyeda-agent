@@ -334,22 +334,71 @@ func syncOutcomeError(res SyncResult) error {
 	return errors.Join(failures...)
 }
 
+func downloadBytesWithFallback(ctx context.Context, primary string, limit int64, expected string, allowMirror bool) ([]byte, error) {
+	download := func(url string) ([]byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
+		}
+		return io.ReadAll(io.LimitReader(resp.Body, limit))
+	}
+	var primaryErr error
+	for range 3 {
+		body, err := download(primary)
+		if err == nil && (expected == "" || checksumHex(body) == strings.ToLower(expected)) {
+			return body, nil
+		}
+		if err == nil {
+			err = fmt.Errorf("checksum mismatch from GitHub")
+		}
+		primaryErr = err
+	}
+	if !allowMirror {
+		return nil, primaryErr
+	}
+	mirror := githubProxyURL(primary)
+	if mirror == "" {
+		return nil, primaryErr
+	}
+	body, err := download(mirror)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub download failed (%v); mirror failed: %w", primaryErr, err)
+	}
+	if expected != "" && checksumHex(body) != strings.ToLower(expected) {
+		return nil, fmt.Errorf("GitHub download failed (%v); mirror checksum mismatch", primaryErr)
+	}
+	return body, nil
+}
+
+func checksumHex(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
 // fetchSkillTree downloads skills.tar.gz for the version and extracts it to a
 // temp dir, returning the path to the extracted `easyeda-agent/` root plus a
 // cleanup func.
 func fetchSkillTree(ctx context.Context, version string) (root string, cleanup func(), err error) {
 	url := tarballURL(version)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", func() {}, err
+	want, checksumErr := fetchChecksum(ctx, version, "skills.tar.gz")
+	legacyNoChecksum := errors.Is(checksumErr, errChecksumUnavailable)
+	if checksumErr != nil && !legacyNoChecksum {
+		return "", func() {}, fmt.Errorf("verify skills.tar.gz: %w", checksumErr)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	archive, err := downloadBytesWithFallback(ctx, url, (64<<20)+1, want, !legacyNoChecksum)
 	if err != nil {
-		return "", func() {}, err
+		return "", func() {}, fmt.Errorf("download skills.tar.gz: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", func() {}, fmt.Errorf("download skills.tar.gz: %s", resp.Status)
+	if len(archive) > 64<<20 {
+		return "", func() {}, fmt.Errorf("skills.tar.gz exceeds 64 MiB")
 	}
 
 	tmp, err := os.MkdirTemp("", "easyeda-skill-*")
@@ -359,22 +408,8 @@ func fetchSkillTree(ctx context.Context, version string) (root string, cleanup f
 	cleanup = func() { _ = os.RemoveAll(tmp) }
 
 	// Verify the entire archive before trusting or installing any extracted file.
-	archive, err := io.ReadAll(io.LimitReader(resp.Body, (64<<20)+1))
-	if err != nil || len(archive) > 64<<20 {
-		cleanup()
-		if err == nil {
-			err = fmt.Errorf("skills.tar.gz exceeds 64 MiB")
-		}
-		return "", func() {}, err
-	}
 	sum := sha256.Sum256(archive)
-	want, err := fetchChecksum(ctx, version, "skills.tar.gz")
-	legacyNoChecksum := errors.Is(err, errChecksumUnavailable)
-	if err != nil && !errors.Is(err, errChecksumUnavailable) {
-		cleanup()
-		return "", func() {}, fmt.Errorf("verify skills.tar.gz: %w", err)
-	}
-	if err == nil && !strings.EqualFold(want, hex.EncodeToString(sum[:])) {
+	if !legacyNoChecksum && !strings.EqualFold(want, hex.EncodeToString(sum[:])) {
 		cleanup()
 		return "", func() {}, fmt.Errorf("checksum mismatch for skills.tar.gz")
 	}

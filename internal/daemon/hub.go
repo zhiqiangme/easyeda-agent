@@ -563,7 +563,7 @@ func connectorVersionOK(connector, daemon, newestPeer string) *bool {
 	if cn == "" {
 		return nil
 	}
-	if newestPeer != "" && semverLess(cn, newestPeer) {
+	if newestPeer != "" && semverLess(cn, newestPeer) && !sameMajorMinor(cn, newestPeer) {
 		stale := false
 		return &stale
 	}
@@ -572,14 +572,15 @@ func connectorVersionOK(connector, daemon, newestPeer string) *bool {
 	// or "dev" must NOT — its semver core ("0.5.1") is an old tag, not the real
 	// code level, so comparing it to a newer connector would be a false mismatch.
 	if isCleanRelease(daemon) {
-		ok := cn == semverCore(daemon)
+		ok := sameMajorMinor(cn, semverCore(daemon))
 		return &ok
 	}
 	return nil
 }
 
 // staleConnectorNotice returns an actionable one-liner when a just-registered
-// connector is behind the running daemon (both clean semver), or "" otherwise.
+// connector is behind the running daemon's major.minor compatibility line
+// (both clean semver), or "" otherwise. Patch drift is intentionally accepted.
 // The connector .eext has no sideload auto-update, so the daemon can only detect
 // the mismatch and tell the user to re-import — it cannot swap it in place.
 func staleConnectorNotice(connector, daemon string) string {
@@ -587,7 +588,7 @@ func staleConnectorNotice(connector, daemon string) string {
 	if cn == "" || dn == "" || !isCleanRelease(daemon) {
 		return "" // dev build or unparseable — no hard verdict
 	}
-	if !semverLess(cn, dn) {
+	if !semverLess(cn, dn) || sameMajorMinor(cn, dn) {
 		return ""
 	}
 	return fmt.Sprintf("stale connector: v%s < daemon v%s — re-import the connector .eext "+
@@ -627,6 +628,11 @@ func semverLess(a, b string) bool {
 		}
 	}
 	return false
+}
+
+func sameMajorMinor(a, b string) bool {
+	ap, bp := strings.Split(a, "."), strings.Split(b, ".")
+	return len(ap) == 3 && len(bp) == 3 && ap[0] == bp[0] && ap[1] == bp[1]
 }
 
 // semverCore extracts the "x.y.z" core from a version string, dropping a leading

@@ -173,6 +173,25 @@ func TestLatestReleaseVersionFallsBackToWebRedirect(t *testing.T) {
 	}
 }
 
+func TestSkillArchiveDownloadFallsBackToVerifiedMirror(t *testing.T) {
+	body := []byte("verified archive bytes")
+	expected := checksumHex(body)
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "upstream failed", http.StatusBadGateway)
+	}))
+	defer primary.Close()
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer mirror.Close()
+	t.Setenv(GitHubProxyEnv, mirror.URL+"/{url}")
+
+	got, err := downloadBytesWithFallback(context.Background(), primary.URL+"/skills.tar.gz", 1<<20, expected, true)
+	if err != nil || !bytes.Equal(got, body) {
+		t.Fatalf("mirror body=%q err=%v", got, err)
+	}
+}
+
 func TestSyncSkills_UpdateAndIdempotent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
