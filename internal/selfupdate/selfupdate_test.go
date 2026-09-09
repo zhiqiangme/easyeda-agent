@@ -115,15 +115,62 @@ func serveRelease(t *testing.T, version string, tarball []byte) *httptest.Server
 			http.NotFound(w, r)
 		}
 	}))
-	oldTar, oldLatest, oldSums := tarballURL, latestAPIURL, checksumsURL
+	oldTar, oldLatest, oldLatestWeb, oldSums := tarballURL, latestAPIURL, latestWebURL, checksumsURL
 	tarballURL = func(v string) string { return srv.URL + "/download" }
 	latestAPIURL = func() string { return srv.URL + "/releases/latest" }
 	checksumsURL = func(string) string { return srv.URL + "/checksums" }
 	t.Cleanup(func() {
-		tarballURL, latestAPIURL, checksumsURL = oldTar, oldLatest, oldSums
+		tarballURL, latestAPIURL, latestWebURL, checksumsURL = oldTar, oldLatest, oldLatestWeb, oldSums
 		srv.Close()
 	})
 	return srv
+}
+
+func TestLatestReleaseVersionUsesGitHubToken(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GITHUB_TOKEN", "ignored-token")
+	var authorization string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"tag_name":"v1.4.7"}`))
+	}))
+	defer srv.Close()
+	old := latestAPIURL
+	latestAPIURL = func() string { return srv.URL }
+	t.Cleanup(func() { latestAPIURL = old })
+
+	got, err := LatestReleaseVersion(context.Background())
+	if err != nil || got != "1.4.7" {
+		t.Fatalf("latest=%q err=%v", got, err)
+	}
+	if authorization != "Bearer test-token" {
+		t.Fatalf("authorization=%q", authorization)
+	}
+}
+
+func TestLatestReleaseVersionFallsBackToWebRedirect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api":
+			http.Error(w, "rate limited", http.StatusForbidden)
+		case "/zhoushoujianwork/easyeda-agent/releases/latest":
+			http.Redirect(w, r, "/zhoushoujianwork/easyeda-agent/releases/tag/v1.4.7", http.StatusFound)
+		case "/zhoushoujianwork/easyeda-agent/releases/tag/v1.4.7":
+			_, _ = w.Write([]byte("release"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	oldAPI, oldWeb := latestAPIURL, latestWebURL
+	latestAPIURL = func() string { return srv.URL + "/api" }
+	latestWebURL = func() string { return srv.URL + "/zhoushoujianwork/easyeda-agent/releases/latest" }
+	t.Cleanup(func() { latestAPIURL, latestWebURL = oldAPI, oldWeb })
+
+	got, err := LatestReleaseVersion(context.Background())
+	if err != nil || got != "1.4.7" {
+		t.Fatalf("fallback latest=%q err=%v", got, err)
+	}
 }
 
 func TestSyncSkills_UpdateAndIdempotent(t *testing.T) {

@@ -19,7 +19,8 @@ easyeda update
 `update --check` 只读；`--check --exit-code` 是 Agent 会话硬门，只有 CLI、已安装的
 客户端 Skill、运行中的 daemon 和所有已连接 Connector 都可验证且精确等于 GitHub
 latest 时返回 0。任何落后、超前、开发构建、未知或未连接状态都返回 10；查询 latest
-本身失败返回 1。普通 `update` 更新 CLI 与已安装的 Skill，不能安装或替换编辑器里的连接器。需要安装缺失的客户端
+本身失败返回 1。latest 查询会使用 `GH_TOKEN` / `GITHUB_TOKEN`，API 匿名额度耗尽时回退
+到公开 Release 重定向。普通 `update` 更新 CLI 与已安装的 Skill，不能安装或替换编辑器里的连接器。需要安装缺失的客户端
 Skill 时用 `--create-missing`，保留本地 Skill 修改用 `--preserve`，固定发布版用
 `--version <version>`。更新二进制后还需让 daemon 使用新二进制启动。
 

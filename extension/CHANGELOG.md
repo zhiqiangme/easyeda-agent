@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.4.7] — 2026-09-10
+
+### Fixed
+
+- Authenticate latest-release checks with `GH_TOKEN` / `GITHUB_TOKEN`, and fall back from an exhausted GitHub API quota to the public `releases/latest` redirect. Apply the same redirect fallback in the one-line installer so an HTTP 403 does not falsely block an otherwise current installation.
+
 ## [1.4.6] — 2026-09-09
 
 ### Changed

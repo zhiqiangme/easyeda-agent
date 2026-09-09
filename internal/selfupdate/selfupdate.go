@@ -48,6 +48,9 @@ var (
 	latestAPIURL = func() string {
 		return fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", RepoSlug)
 	}
+	latestWebURL = func() string {
+		return fmt.Sprintf("https://github.com/%s/releases/latest", RepoSlug)
+	}
 )
 
 // SkillTarget is one installed (or installable) skill location.
@@ -141,9 +144,9 @@ func readMarker(dir string) string {
 	return strings.TrimSpace(string(b))
 }
 
-// LatestReleaseVersion queries the GitHub API for the newest release tag and
-// returns its bare semver core (e.g. "0.9.0"). Best-effort: honors ctx deadline,
-// returns an error on any network/parse failure so callers can skip silently.
+// LatestReleaseVersion resolves the newest GitHub release tag. It authenticates
+// the API request when GH_TOKEN/GITHUB_TOKEN is available, then falls back to
+// GitHub's public releases/latest redirect when anonymous API quota is exhausted.
 func LatestReleaseVersion(ctx context.Context) (string, error) {
 	url := latestAPIURL()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -151,25 +154,53 @@ func LatestReleaseVersion(ctx context.Context) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if token := githubToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := http.DefaultClient.Do(req)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			var body struct {
+				TagName string `json:"tag_name"`
+			}
+			if decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); decodeErr == nil {
+				if core := SemverCore(body.TagName); core != "" {
+					return core, nil
+				}
+			}
+		}
+	}
+	apiErr := err
+	if apiErr == nil {
+		apiErr = fmt.Errorf("github releases/latest: %s", resp.Status)
+	}
+
+	webReq, err := http.NewRequestWithContext(ctx, http.MethodGet, latestWebURL(), nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%v; build latest-release fallback: %w", apiErr, err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("github releases/latest: %s", resp.Status)
+	webResp, err := http.DefaultClient.Do(webReq)
+	if err != nil {
+		return "", fmt.Errorf("%v; github releases/latest fallback: %w", apiErr, err)
 	}
-	var body struct {
-		TagName string `json:"tag_name"`
+	defer webResp.Body.Close()
+	if webResp.StatusCode < 200 || webResp.StatusCode >= 400 {
+		return "", fmt.Errorf("%v; github releases/latest fallback: %s", apiErr, webResp.Status)
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
-		return "", err
+	tag := strings.TrimPrefix(webResp.Request.URL.Path, "/"+RepoSlug+"/releases/tag/")
+	if core := SemverCore(tag); core != "" {
+		return core, nil
 	}
-	core := SemverCore(body.TagName)
-	if core == "" {
-		return "", fmt.Errorf("unparseable tag %q", body.TagName)
+	return "", fmt.Errorf("%v; github releases/latest fallback had no release tag in %s", apiErr, webResp.Request.URL)
+}
+
+func githubToken() string {
+	if token := strings.TrimSpace(os.Getenv("GH_TOKEN")); token != "" {
+		return token
 	}
-	return core, nil
+	return strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 }
 
 // SyncOptions configures SyncSkills.

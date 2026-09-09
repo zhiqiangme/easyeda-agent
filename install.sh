@@ -51,6 +51,19 @@ rate_limit_fatal() {
   exit 1
 }
 
+resolve_latest_web() {
+  _meta=$(curl -sSL --connect-timeout 15 --max-time 60 -o /dev/null \
+    -w '%{url_effective}\n%{http_code}' "https://github.com/${REPO}/releases/latest") || return 1
+  _code=$(printf '%s\n' "$_meta" | tail -n 1)
+  _url=$(printf '%s\n' "$_meta" | sed '$d')
+  [ "$_code" = 200 ] || return 1
+  _tag=${_url##*/}
+  case "$_tag" in
+    v[0-9]*.[0-9]*.[0-9]*) VERSION="$_tag"; return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 if [ -n "$VERSION" ]; then
   # Tags are v-prefixed; accept "0.18.2" as well as "v0.18.2".
   case "$VERSION" in
@@ -76,15 +89,23 @@ else
   case "$API_CODE" in
     200) ;;
     401) fatal "GitHub API rejected the token (HTTP 401). Unset GITHUB_TOKEN/GH_TOKEN or run 'gh auth login', or pass EASYEDA_VERSION=<tag>." ;;
-    403|429) rate_limit_fatal "$API_CODE" "$API_TOKEN" ;;
+    403|429)
+      if resolve_latest_web; then
+        warn "GitHub API returned HTTP ${API_CODE}; resolved latest from the public release redirect"
+      else
+        rate_limit_fatal "$API_CODE" "$API_TOKEN"
+      fi
+      ;;
     404) fatal "No 'latest' release for ${REPO} (HTTP 404). Pick a tag from https://github.com/${REPO}/releases and pass EASYEDA_VERSION=<tag>." ;;
     '' | 000) fatal "Could not reach api.github.com (network or proxy issue). Retry, or pass EASYEDA_VERSION=<tag> to skip the API." ;;
     *) fatal "GitHub API returned HTTP ${API_CODE} while resolving the latest release. Pass EASYEDA_VERSION=<tag> to skip the API." ;;
   esac
 
-  VERSION=$(printf '%s\n' "$API_BODY" \
-    | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-  [ -n "$VERSION" ] || fatal "Could not parse a tag_name out of the GitHub API response. Pass EASYEDA_VERSION=<tag> to skip the API."
+  if [ -z "${VERSION:-}" ]; then
+    VERSION=$(printf '%s\n' "$API_BODY" \
+      | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+    [ -n "$VERSION" ] || fatal "Could not parse a tag_name out of the GitHub API response. Pass EASYEDA_VERSION=<tag> to skip the API."
+  fi
   info "Latest: ${VERSION}"
 fi
 
