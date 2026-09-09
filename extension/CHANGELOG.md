@@ -29,7 +29,7 @@
 
 - Windows PowerShell 5.1 native executable regressions pass for both schematic and PCB patch files; Linux/macOS/Windows install smoke and DSH path tests pass in CI.
 - 20 resistance-selection regressions, 60 script tests, 280 connector tests and the Go/Skill checks pass. Live EasyEDA 3.2.186 PCB moves, silk creation and save/reopen readback pass.
-- Native net-label creation (#191), the reported old-host empty reads (#200), grouping (#173) and the complete ESP32 board acceptance (#43) remain open. Actual 3D import and the complete Windows DSH loader/editor workflow were not rerun.
+- Native net-label creation (#191), grouping (#173) and the complete ESP32 board acceptance (#43) remain open. Issue #200 was already closed with a suggestion to use the web editor; its original old-host failure was not independently reproduced. Actual 3D import and the complete Windows DSH loader/editor workflow were not rerun.
 
 ## [1.4.3] — 2026-09-08
 
