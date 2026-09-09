@@ -34,6 +34,7 @@ import json
 import os
 import re
 import sys
+from decimal import Decimal
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STANDARD_PARTS = os.path.normpath(
@@ -69,19 +70,137 @@ def _term_hits(text, qterms):
                if t in text or re.sub(r'[-_.]+', '', t) in ctext)
 
 
+# Explicit resistance is a quantity, not a substring of an MPN (#202).
+# Keep SI prefix case until conversion: mΩ and MΩ differ by 10^9.
+_OHM_UNIT = r'(?:Ω|Ω|(?i:ohms?))'
+# A symbol always activates the gate, even when attached to malformed text.
+# English unit detection needs a standalone/numeric prefix so UNIOHM stays a
+# brand query. ASCII boundaries allow ordinary Chinese adjacency (33Ω电阻).
+_OHM_TOKEN = re.compile(
+    r'[ΩΩ]|[0-9.]+\s*[A-Za-zµμ]?\s*(?i:ohms?)|'
+    r'(?<![A-Za-z0-9_])(?i:ohms?)(?![A-Za-z0-9_])')
+# Detection is wider than parsing: an unsupported prefix (1uohm) or numeric
+# expression (3e3ohm) must trigger rejection, not restore fuzzy recommendations.
+_RESISTANCE = re.compile(
+    r'(?<![A-Za-z0-9_.])(?P<number>\d+(?:\.\d+)?|\.\d+)\s*'
+    r'(?P<prefix>[mMkK]?)\s*' + _OHM_UNIT + r'(?![A-Za-z0-9_]|[.,][0-9])')
+_RESISTANCE_SHORT = re.compile(
+    r'(?P<number>\d+(?:\.\d+)?|\.\d+)\s*(?P<prefix>[mMkKrR])')
+_OHM_SCALE = {'': Decimal(1), 'r': Decimal(1), 'R': Decimal(1),
+              'm': Decimal('0.001'), 'k': Decimal(1000),
+              'K': Decimal(1000), 'M': Decimal(1000000)}
+
+
+def _ohms(match):
+    return Decimal(match['number']) * _OHM_SCALE[match['prefix']]
+
+
+def _resistance_matches(text):
+    # Unsupported fractions, decimal commas, inequalities and ranges must not
+    # be reinterpreted as their numeric tail (1,000Ω -> 0Ω; 1/2Ω -> 2Ω).
+    # Check after rstrip too, so adding whitespace after an operator cannot
+    # bypass the boundary. Full fields are still parsed with fullmatch below.
+    return [m for m in _RESISTANCE.finditer(text)
+            if not text[:m.start()].rstrip().endswith(tuple('.,/+-*^<>=~≤≥±×÷−'))]
+
+
+def _resistance_query(keyword):
+    """Gate only explicit Ω/ohm requests; malformed/ambiguous values fail closed.
+
+    The remaining query terms still rank footprint/category/text, after the
+    quantity matches. A bare MPN or a non-resistance query keeps its old behavior.
+    """
+    matches = _resistance_matches(keyword)
+    units = list(_OHM_TOKEN.finditer(keyword))
+    if not units:
+        return False, None, keyword
+    values = {_ohms(m) for m in matches}
+    if len(matches) != len(units) or len(values) != 1:
+        return True, None, keyword
+    return True, next(iter(values)), _RESISTANCE.sub(' ', keyword)
+
+
+def _resistance_value(value, shorthand=False):
+    """Read an entire declared resistance field, never an MPN/key/other number."""
+    text = str(value or '').strip()
+    match = _RESISTANCE.fullmatch(text)
+    if not match and shorthand:
+        # Curated res.* entries also use conventional field values like 1M/10k.
+        # This rule is deliberately NOT applied to online descriptions or MPNs.
+        match = _RESISTANCE_SHORT.fullmatch(text)
+    return _ohms(match) if match else None
+
+
+def _description_resistances(description):
+    """Return all explicit quantities, or None for a malformed unit expression."""
+    text = str(description or '')
+    matches = _resistance_matches(text)
+    if len(matches) != len(list(_OHM_TOKEN.finditer(text))):
+        return None
+    return {_ohms(m) for m in matches}
+
+
+def _resistance_evidence(raw, ohms, source):
+    return {'raw': raw, 'ohms': format(ohms.normalize(), 'f'), 'source': source}
+
+
+def _local_resistance(key, part):
+    if not key.startswith('res.'):
+        return None
+    raw = part.get('value')
+    ohms = _resistance_value(raw, shorthand=True)
+    description = _description_resistances(part.get('desc'))
+    if ohms is None or description is None or description - {ohms}:
+        return None
+    return _resistance_evidence(raw, ohms, 'standard-parts.value')
+
+
+def _online_resistance(candidate):
+    # The category must say resistor. A matching inductor DCR/ferrite impedance
+    # is not the requested component; a Resistance attribute alone is insufficient.
+    category = str(candidate.get('componentTypeEn') or candidate.get('secondSortName') or '')
+    if not re.search(r'\bresistors?\b|电阻', category, re.IGNORECASE):
+        return None
+    attrs = candidate.get('attributes') or []
+    if not isinstance(attrs, list):
+        return None
+    declared = [a.get('attribute_value_name') for a in attrs if isinstance(a, dict)
+                and str(a.get('attribute_name_en') or '').strip().lower() in ('resistance', '阻值')]
+    description = _description_resistances(candidate.get('describe'))
+    if description is None:
+        return None
+    if declared:
+        values = {_resistance_value(value) for value in declared}
+        if None in values or len(values) != 1 or description - values:
+            return None
+        return _resistance_evidence(declared[0], next(iter(values)), 'attributes.Resistance')
+    # A typed resistor with one unambiguous, explicitly unit-bearing description
+    # may serve as a fallback; all other fields (including MPN) remain excluded.
+    if len(description) == 1:
+        match = _RESISTANCE.search(str(candidate.get('describe') or ''))
+        return _resistance_evidence(match.group(), next(iter(description)), 'describe')
+    return None
+
+
 # ── TIER 1: offline standard-parts.json ─────────────────────────────────────
 
 def local_select(keyword):
     """Rank curated standard parts by query-term relevance (offline)."""
     try:
-        with open(STANDARD_PARTS) as f:
+        with open(STANDARD_PARTS, encoding='utf-8') as f:
             parts = json.load(f).get('parts', {})
     except (OSError, json.JSONDecodeError) as e:
         print(f'warn: cannot read {STANDARD_PARTS}: {e}', file=sys.stderr)
         return []
-    qterms = [t for t in norm(keyword).split() if t]
+    resistance_query, requested_ohms, remaining = _resistance_query(keyword)
+    if resistance_query and requested_ohms is None:
+        return []
+    qterms = [t for t in norm(remaining).split() if t]
     ranked = []
     for key, p in parts.items():
+        resistance = _local_resistance(key, p)
+        if resistance_query and (not resistance or Decimal(resistance['ohms']) != requested_ohms):
+            continue
         # Identity fields (key/value/mpn/lcsc) weigh double vs. prose fields —
         # a desc that merely *mentions* "100nF" (e.g. an RC-filter note on a
         # resistor) must not tie with the actual 100nF cap.
@@ -89,7 +208,7 @@ def local_select(keyword):
                      f"{p.get('mpn', '')} {p.get('lcsc', '')}")
         prose = norm(f"{p.get('desc', '')} {p.get('footprint', '')} "
                      f"{p.get('manufacturer', '')}")
-        rel = 2 * _term_hits(ident, qterms) + _term_hits(prose, qterms)
+        rel = 2 * _term_hits(ident, qterms) + _term_hits(prose, qterms) + int(resistance_query)
         if rel == 0:
             continue
         ranked.append({
@@ -98,6 +217,7 @@ def local_select(keyword):
             'brand': p.get('manufacturer'), 'desc': p.get('desc'),
             'deviceUuid': p.get('deviceUuid'),
             'relevance': rel, 'base': bool(p.get('basic')),
+            **({'resistance': resistance} if resistance else {}),
         })
     maxrel = max((r['relevance'] for r in ranked), default=0)
     ranked = [r for r in ranked if r['relevance'] >= maxrel]
@@ -145,6 +265,9 @@ def unit_price_at(prices, qty):
 
 
 def select(keyword, qty=100, n=20):
+    resistance_query, requested_ohms, remaining = _resistance_query(keyword)
+    if resistance_query and requested_ohms is None:
+        return []
     # JLC's default search returns only extended parts in the top page; the few
     # BASIC parts must be requested explicitly. The base library per category is
     # small (~tens), but the wanted basic (e.g. the 10k C25744) can rank below other
@@ -155,9 +278,12 @@ def select(keyword, qty=100, n=20):
         if code and code not in seen:
             seen.add(code)
             cands.append(c)
-    qterms = [t for t in norm(keyword).split() if t]
+    qterms = [t for t in norm(remaining).split() if t]
     ranked = []
     for c in cands:
+        resistance = _online_resistance(c)
+        if resistance_query and (not resistance or Decimal(resistance['ohms']) != requested_ohms):
+            continue
         stock = c.get('stockCount') or 0
         unit = float(unit_price_at(c.get('componentPrices'), qty) or 9.99)
         ranked.append({
@@ -166,10 +292,11 @@ def select(keyword, qty=100, n=20):
             'mpn': c.get('componentModelEn'),
             'brand': c.get('componentBrandEn'),
             'desc': c.get('describe') or c.get('componentSpecificationEn'),
-            'relevance': relevance(c, qterms),
+            'relevance': relevance(c, qterms) + int(resistance_query),
             'base': c.get('componentLibraryType') == 'base',
             'preferred': bool(c.get('preferredComponentFlag')),
             'stock': stock, 'in_stock': stock >= qty, 'unit': unit,
+            **({'resistance': resistance} if resistance else {}),
         })
     # Spec match FIRST (drop candidates whose value doesn't match — a cheap basic
     # 220pF must not win a 10k query); THEN buildable (stock >= qty, so the pick can
@@ -195,6 +322,9 @@ def print_local(ranked, query):
     best = ranked[0]
     print(f"\n✅ 推荐: {best['lcsc']} ({best['mpn']}) — 标准件库 `{best['key']}`, "
           f"deviceUuid={best['deviceUuid']}")
+    if best.get('resistance'):
+        r = best['resistance']
+        print(f"   阻值原文: {r['raw']} = {r['ohms']} Ω; 来源: {r['source']}")
     print("   直接用于 schematic.component.place;需复核身份时: "
           f"easyeda lib by-lcsc --lcsc {best['lcsc']}")
 
@@ -214,6 +344,9 @@ def print_online(ranked, query, qty):
         print(f"\n✅ 推荐: {best['lcsc']} ({best['mpn']}) — "
               f"{'BASIC' if best['base'] else 'extended'}, 库存 {best['stock']}, "
               f"单价@{qty} {best['unit']}{warn}")
+        if best.get('resistance'):
+            r = best['resistance']
+            print(f"   阻值原文: {r['raw']} = {r['ohms']} Ω; 来源: {r['source']}")
         print(f"   下一步(确定性解析设备身份): easyeda lib by-lcsc --lcsc {best['lcsc']}")
         print("   选定后请把该件补进 references/standard-parts.json,下次即可离线命中")
 
@@ -231,16 +364,20 @@ def main():
     n = int(av[av.index('--n') + 1]) if '--n' in av else 20
     online = '--online' in av
     query = args[0]
+    resistance_query, _, _ = _resistance_query(query)
 
     local = local_select(query)
     if not online:
         if '--json' in av:
             print(json.dumps(local, ensure_ascii=False, indent=1))
-            return 0
+            return int(resistance_query and not local)
         if local:
             print_local(local, query)
         else:
             print(f'query="{query}"  source=standard-parts.json (offline)  candidates=0\n')
+            if resistance_query:
+                print('显式阻值未找到经来源证实的电阻候选；不作模糊推荐。')
+                return 1
             print('本地标准件库无匹配。两条路(不自动联网):')
             print('  1. 加 --online 显式启用 jlcpcb.com 在线目录比对(库存/价格/basic)')
             print('  2. 已知 C 号时直接: easyeda lib by-lcsc --lcsc <C-number>;'
@@ -251,11 +388,14 @@ def main():
     if '--json' in av:
         # same flat-list shape as the pre-#177 script (plus a 'source' field)
         print(json.dumps(ranked, ensure_ascii=False, indent=1))
-        return 0
+        return int(resistance_query and not ranked)
     if local:
         print_local(local, query)
         print('\n── 在线比对 (--online) ──\n')
     print_online(ranked, query, qty)
+    if resistance_query and not ranked:
+        print('显式阻值未找到经来源证实的在线电阻候选；不作模糊推荐。')
+        return 1
     return 0
 
 

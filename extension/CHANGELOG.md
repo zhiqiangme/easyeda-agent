@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Verify explicit resistance queries numerically before ranking parts; preserve milli/mega prefixes and reject matches inferred from MPN digits. Add Skill guidance to retain parameter sources and verify manufacturer-specific value codes (#202).
 - Skip rotation calibration when connecting a native schematic net label, which has no rotation parameter. The host's EDA v4 label API remains pending on the tested 3.2.186 host; this does not claim native-label compatibility is fixed (#191).
 - Resolve DSH MCP and Skill file URLs with Node's `fileURLToPath`, preserving Windows drive/UNC paths and escaped characters (#201); add cross-platform path and native-launch CI tests.
 

@@ -43,6 +43,8 @@ metadata:
 
 **先确定连接数据，再计算几何，最后转换与回读。** 新设计依据具体型号的数据手册和典型电路；
 已有图先导出 `sch connectivity`，未知引脚或网不能靠截图推断。
+器件参数按 [part-selection.md](references/part-selection.md) 留存来源原文和单位换算；
+不从料号数字猜阻值，区分 `mΩ` 与 `MΩ`，参数未核实或相互冲突时不能据此落图。
 
 - `component.id` 是不透明稳定 ID，`ref` 是显示位号，功能名存 `role`。
   保留正常位号的拼写、前导零与顺序；错误名称用 `sch designators` 按官方库前缀修复，
