@@ -10,6 +10,15 @@
 
 ## 本地设计比较与 Lib 内部计算
 
+### Block Template 与公共 Lib Module
+
+两者互补而不互相替代。Block Template 是由角色器件、固定内部拓扑、可重绑端口和约束组成的
+**生成配方**；实例化后只剩普通 part、导线和虚拟组，`block` 不是运行时布局层。公共 Lib
+Module 是 GitHub 版本化的数据资产：从 `draft` 功能证据开始，补齐确定拓扑后成为
+`topology_ready`，再补齐库身份、完整 pin→net/NC 与官方实测几何后成为 `compose_ready`。
+只有最后一级可以直接进入 `sch compose`。同一功能若已有 Block，Lib 记录引用它，不复制维护
+第二份拓扑。
+
 `sch design-diff` 按稳定 ID 比较器件/引脚/网络、库身份、位号及几何，并生成内容修订哈希。
 比较完整 compose 计划时还包括纸张、导线、标记、框与标题；仅提供 connectivity 回读时，
 图形层属于未验证证据。数组存储顺序不等于身份，模块的阅读顺序则属于设计意图。

@@ -59,7 +59,7 @@ EasyEDA。纯 patch 更新不升级 Connector，也不要求重开 EasyEDA。不
 | 原理图/PCB 绘图规范 | [schematic-layout-conventions.md](references/schematic-layout-conventions.md)、[pcb-layout-conventions.md](references/pcb-layout-conventions.md) |
 | 制造规则 | [pcb-design-rules.md](references/pcb-design-rules.md)、[fab-rules-jlcpcb.json](references/fab-rules-jlcpcb.json) |
 | action 或队列字段 | [actions.md](references/actions.md)；未知官方接口先 `easyeda api search/show` |
-| 提交已验证电路到块库 | [standard-blocks-contributing.md](references/standard-blocks-contributing.md) |
+| 查找或贡献公共复用数据 | [reusable-module-library.md](references/reusable-module-library.md)；拓扑模板再读 [standard-blocks-contributing.md](references/standard-blocks-contributing.md) |
 
 ## 1.4 原理图主流程
 
@@ -73,6 +73,9 @@ EasyEDA。纯 patch 更新不升级 Connector，也不要求重开 EasyEDA。不
   端子也不强制改为 `J`。不从 ID 反推 ref，不覆盖原生 `uniqueId`。
 - 按功能组织 Lib：核心器件加外围，以真实短线连接。VCC/GND 可局部重复放置；
   标签用于电源或模块边界，不替代连接图。多引脚同功能（例如 AMS1117 双 VOUT）逐脚核对。
+- 复用前先查 `library/modules/catalog.json`。`draft` 只表示已有脱敏功能证据，不能直接绘图；
+  `topology_ready` 可转成实例连接核心；只有 `compose_ready` 且通过目录审计的资产才能直接交给
+  `sch compose`。Block 是可参数化的拓扑配方，不是 Lib 实例或运行时布局层。
 - 从官方接口读取器件与引脚几何，保留测量源；用 `sch lib-layout` 从连接图与测量计算 Lib 内部位置与导线。
   自编计算须保留脚本和参数，让输入能够重现目标 JSON。`sch compose` 消费已设计的模块几何，计算端子直线错长、
   紧凑标题和左上起排的 Z 字布局。每框保留自身紧凑高度，同行顶齐，按该行最大高度换行。默认 A4 一页，容量不足按已确认的功能拆页。
@@ -124,4 +127,4 @@ PCB 制造交付还须确认层叠、GND、电源、丝印与导出文件。离�
 均不等于从客户需求到 PCB 的全流程验收。
 
 常用辅助脚本：`scripts/lint.sh`、`bom-enrich.py`、`parts-select.py`、`parts-add.py`、
-`blocks-pin-audit.py`、`tests/run.py`。按对应参考使用；具体参数先看脚本 `--help`。
+`blocks-pin-audit.py`、`modules-audit.py`、`tests/run.py`。按对应参考使用；具体参数先看脚本 `--help`。

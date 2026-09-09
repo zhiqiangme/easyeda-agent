@@ -11,6 +11,10 @@
 | CLI 内嵌 block 模板 | 仓库 `internal/blocks/data/` 一块一文件，经 `go:embed` 编进 CLI，不随 Skill 分发。`sch block-apply <id>` 解析角色、分配位号、放件并连接内部网与边界。 |
 | 本地 Lib composition | 已确定的连接核心加已设计、实测的局部几何，经 `sch compose` 计算模块平移、单页 Z 字排版及框标题，再生成受保护 `sch apply` 队列。格式见 [schematic-data.md](schematic-data.md)。 |
 
+公共 Lib 候选、成熟度及来源策略统一登记在
+[reusable-module-library.md](reusable-module-library.md) 所述目录。一个候选可以引用现有
+Block；只有当它需要参数化生成拓扑时才提升为新 Block，不能为了“收纳数据”重复造模板。
+
 模板的 `parts.<ROLE>` 与实例的稳定 component ID、ref、role 属于不同层，模板 JSON
 不能直接作为 composition 输入。`block-apply` 每次创建新实例，并非幂等修复命令；
 部分失败后先回读现场，不能直接重跑。两条路径都不等于从任意拓扑自动设计全部外围与布局。

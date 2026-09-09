@@ -238,7 +238,7 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
     `connect_pin`, so they can't drift) + fixture goldens;
   - a **diff baseline** — `lint.sh <project> --save` records a snapshot, later runs
     show only NEW / FIXED / PRE-EXISTING findings plus the changed primitives.
-- **🧩 Standard circuit-block library (电路块库) — flagship capability.** A
+- **🧩 Standard circuit-block library (电路块库) — topology-template capability.** A
   community-built, credited library of KNOWN-GOOD peripheral subcircuits
   (`skills/easyeda-agent/references/blocks/*.json`, one block per file): CH340 USB-serial, ESP32
   auto-download, button de-bounce, USB-hub, buck… Their internal topology is fixed
@@ -252,19 +252,16 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
   - **Three knowledge dimensions per block**: parts (with alternatives) +
     `schematic_notes` (wiring gotchas) + `pcb_layout` (structured electrical
     constraints with `severity`, future-feedable to `pcb check`).
-  - **Validation gate**: a block only enters the library after one full-flow proof
-    (`place → wire → sch check → DRC=0`); until then `validated:null` +
-    `internal_nets:"pending"`. Topologies are harvested from validated oshwhub
-    boards / official reference designs, never hand-written from memory.
+  - **Validation gate**: draft topology is still structurally complete and explicitly
+    unverified; `internal_nets:"pending"` is no longer an accepted placeholder. Production
+    readiness requires the staged evidence described by the contribution contract.
   - **Attribution**: `author`/`contributors` (GitHub @handles, never removed) +
     `added`/`updated` versions — *contribute once, benefit forever*. Contribution
     standard + PR gate: `references/standard-blocks-contributing.md`.
-  - **Tooling**: `scripts/blocks.py ls | show <id> | validate [--strict]` — browse
-    blocks and lint the JSON against the schema + contribution rules (the PR gate;
-    cross-checks every `parts` key against `standard-parts.json`). Network-free,
-    daemon-free — the local companion to the JSON, like `parts-select.py` is for
-    parts. Schematic instantiation is the phase-2 write path (see Roadmap →
-    `sch block apply`).
+  - **Tooling**: `easyeda blocks ls/search/show` browses the embedded templates;
+    `make blocks-audit` checks their real symbol pin references. `sch block-apply`
+    is the write path. Public instance-level Lib candidates and compose assets live
+    separately under the Skill `library/modules/` and are checked by `make modules-audit`.
 - **Connector self-healing reconnect** — the connector port-scans 60832-60841,
   validates a handshake, and reconnects on liveness loss. It **never permanently
   gives up**: after 5 fast retries it drops to a quiet 10s background poll, so a

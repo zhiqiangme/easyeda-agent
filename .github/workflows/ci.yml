@@ -34,6 +34,7 @@ jobs:
       - name: Validate Skill and release helpers
         run: |
           make lint-test
+          make modules-audit
           make release-script-test
           make skill-check
           npx --yes skills-ref@latest validate skills/easyeda-agent
