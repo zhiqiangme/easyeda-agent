@@ -1,6 +1,11 @@
 # PR / Issue 排查（2026-09-08）
 
-当前远端同步状态（2026-09-09）：13 个修复及记录提交已推送到 main（至 d1dc9dd），
+修复已纳入 v1.4.4。按用户后续要求，#190/#192/#201（以及后续 #202）随发版关闭，
+不等待报告者复验；未解决的 #191/#200/#173/#43 保留。发行状态以
+[v1.4.4 Release](https://github.com/zhoushoujianwork/easyeda-agent/releases/tag/v1.4.4)
+为准；以下是发版前的排查与验证记录。
+
+发版前远端同步状态（2026-09-09）：13 个修复及记录提交已推送到 main（至 d1dc9dd），
 [对应 CI](https://github.com/zhoushoujianwork/easyeda-agent/actions/runs/34250243475)
 4 个 job 全部通过。PR #199 已按“完整采纳到 main”关闭；已更新 #190、#192、#201、
 #191、#200 的已有进度评论，Issue 仍保留开放。Windows PowerShell 5.1 原生测试已通过，

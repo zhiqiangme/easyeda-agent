@@ -177,8 +177,8 @@ easyeda update --check    # 只读 CLI / Skill / connector 版本表
 - **SkillHub 身份与凭据**：只使用官方 CLI 安装器
   `curl -fsSL https://skillhub.cn/install/install.sh | bash -s -- --cli-only`。
   同名 CLI 可能属于其他服务，`make skillhub-check` 按实际 `publish` 参数校验身份，
-  必要时用 `SKILLHUB_BIN` 指定。仓库 secret 为 `SKILLHUB_TOKEN`；CI 的身份检查会在
-  publish 直接读取同名环境变量并完成鉴权；不运行 login/whoami，不回显 token 或写入凭据文件。
+  必要时用 `SKILLHUB_BIN` 指定。仓库 secret 为 `SKILLHUB_TOKEN`；CI 的 publish
+  直接读取同名环境变量并完成鉴权，不运行 login/whoami，不回显 token 或写入凭据文件。
 - **SkillHub 包格式**：其 `slug/displayName` 只注入临时 staging 副本；仓库 `SKILL.md`
   保持 Agent Skills 格式。不要为了平台字段破坏公共包的 frontmatter。
 - **立创连接器市场 jlc-ext**：仍需人工通过网页提交，没有发布 CLI/API。
