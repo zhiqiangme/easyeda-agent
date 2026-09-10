@@ -31,6 +31,17 @@
     {"id":"lib.buzzer_driver","title":"蜂鸣器驱动","category":"audio","maturity":"draft","evidenceCount":4,"constraints":["GPIO 驱动能力不足时增加开关管","感性器件按类型评估续流保护","放在板边且不阻塞声孔"]},
     {"id":"lib.display_header","title":"OLED/LCD 显示接口","category":"display","maturity":"draft","evidenceCount":5,"constraints":["接口定义和电平逐脚核实","连接器朝向便于装配","I2C 总线仅保留一组有效上拉"]},
     {"id":"lib.rotary_encoder_input","title":"旋转编码器输入","category":"button","maturity":"draft","evidenceCount":1,"constraints":["A/B/按键输入去抖策略明确","器件靠近板边并保留旋钮操作空间"]},
-    {"id":"lib.mounting_hole_set","title":"安装孔集合","category":"mechanical","maturity":"draft","evidenceCount":6,"constraints":["孔径与紧固件匹配","铜与器件避让圈明确","该项属于板级组合约束而非电气 Block"]}
+    {"id":"lib.mounting_hole_set","title":"安装孔集合","category":"mechanical","maturity":"draft","evidenceCount":6,"constraints":["孔径与紧固件匹配","铜与器件避让圈明确","该项属于板级组合约束而非电气 Block"]},
+    {"id":"lib.usbc_debug_device","title":"USB-C 原生 USB 调试接口","category":"usb","maturity":"topology_ready","topologyAsset":"usbc-debug-device.topology.json","evidenceCount":1,"constraints":["双向 D+/D- 同名物理脚全部连接","串联电阻位于连接器与设备边界之间","SBU 明确保留悬空"]},
+    {"id":"lib.usbc_power_receptacle","title":"USB-C 纯供电受电端","category":"power","maturity":"topology_ready","topologyAsset":"usbc-power-receptacle.topology.json","evidenceCount":1,"constraints":["两个 CC 脚分别下拉","全部 VBUS/GND 物理脚逐脚连接"]},
+    {"id":"lib.reverse_current_ideal_diode","title":"低压侧反向电流保护","category":"protection","maturity":"topology_ready","topologyAsset":"reverse-current-ideal-diode.topology.json","evidenceCount":1,"constraints":["输入输出方向固定","输入输出分别配置储能电容"]},
+    {"id":"lib.sy8089_buck_3v3_live","title":"SY8089 5V 转 3.3V 降压","category":"power","maturity":"topology_ready","topologyAsset":"sy8089-buck-3v3.topology.json","evidenceCount":1,"constraints":["电感位于 LX 与输出之间","反馈分压、前馈电容与使能上拉完整","输入输出各有大小电容"]},
+    {"id":"lib.esp32s3_module_system_live","title":"ESP32-S3 模组最小系统与启动接口","category":"mcu","maturity":"topology_ready","topologyAsset":"esp32s3-module-system.topology.json","evidenceCount":1,"constraints":["保留全部 41 个物理引脚状态","RESET/BOOT 上拉和按键回路完整","USB 串联边界与外设 GPIO 显式暴露"]},
+    {"id":"lib.addressable_rgb_indicator_live","title":"可寻址 RGB 指示灯","category":"indicator","maturity":"topology_ready","topologyAsset":"addressable-rgb-indicator.topology.json","evidenceCount":1,"constraints":["5V 供电并就近去耦","数据输入与未使用级联输出分开记录"]},
+    {"id":"lib.co2_temperature_humidity_live","title":"CO2 与温湿度组合传感","category":"sensing","maturity":"topology_ready","topologyAsset":"co2-temperature-humidity.topology.json","evidenceCount":1,"constraints":["主机 I2C 上拉一次","两个传感器间内部 I2C 边界独立","暴露焊盘逐脚接地"]},
+    {"id":"lib.transistor_buzzer_driver_live","title":"三极管蜂鸣器驱动与续流保护","category":"audio","maturity":"topology_ready","topologyAsset":"transistor-buzzer-driver.topology.json","evidenceCount":1,"constraints":["基极串阻与下拉完整","续流二极管跨接蜂鸣器","蜂鸣器 NC 脚保持悬空"]},
+    {"id":"lib.spi_tft_backlight_driver_live","title":"SPI TFT 与背光开关","category":"display","maturity":"topology_ready","topologyAsset":"spi-tft-backlight-driver.topology.json","evidenceCount":1,"constraints":["显示通信与背光控制端口分离","背光三极管含基极下拉","显示 NC 脚保持悬空"]},
+    {"id":"lib.rotary_encoder_input_live","title":"旋转编码器三路上拉输入","category":"button","maturity":"topology_ready","topologyAsset":"rotary-encoder-input.topology.json","evidenceCount":1,"constraints":["A/B/按键三路各自上拉","公共端与外壳焊盘接地"]},
+    {"id":"lib.hlk_ld2401_switched_live","title":"HLK-LD2401 可控电源与接口","category":"sensing","maturity":"topology_ready","topologyAsset":"hlk-ld2401-switched.topology.json","evidenceCount":1,"constraints":["PMOS 高边开关由 NPN 下拉控制","开关输出带大小去耦","UART、存在输出和未使用脚状态全部保留"]}
   ]
 }

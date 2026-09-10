@@ -48,6 +48,7 @@ def main() -> int:
         f"block.{path.stem}" for path in BLOCKS.glob("*.json") if not path.name.startswith("_")
     } if BLOCKS.is_dir() else set()
     seen: set[str] = set()
+    topology_cache: dict[str, set[str]] = {}
     for index, item in enumerate(modules):
         where = f"modules[{index}]"
         if not isinstance(item, dict):
@@ -90,6 +91,72 @@ def main() -> int:
                 fail(errors, where, f"invalid {asset_key}")
             elif not (CATALOG.parent / asset).is_file():
                 fail(errors, where, f"missing {asset_key} {asset}")
+        topology_asset = item.get("topologyAsset")
+        if topology_asset is not None:
+            if not isinstance(topology_asset, str) or Path(topology_asset).name != topology_asset or not topology_asset.endswith(".json"):
+                fail(errors, where, "invalid topologyAsset")
+            else:
+                path = CATALOG.parent / topology_asset
+                if not path.is_file():
+                    fail(errors, where, f"missing topologyAsset {topology_asset}")
+                elif topology_asset not in topology_cache:
+                    try:
+                        topology = json.loads(path.read_text(encoding="utf-8"))
+                        records = topology.get("modules")
+                        if records is None and isinstance(topology.get("module"), dict):
+                            records = [topology["module"]]
+                        if not isinstance(records, list) or not records:
+                            raise ValueError("topology asset needs module or non-empty modules")
+                        topology_cache[topology_asset] = {record.get("id") for record in records if isinstance(record, dict)}
+                        for record_index, record in enumerate(records):
+                            record_where = f"{topology_asset}.modules[{record_index}]"
+                            if record.get("maturity") != "topology_ready":
+                                fail(errors, record_where, "extracted topology must be topology_ready")
+                            pin_nets: dict[str, str] = {}
+                            roles: set[str] = set()
+                            for part in record.get("parts", []):
+                                role = part.get("role")
+                                if not isinstance(role, str) or not role or role in roles:
+                                    fail(errors, record_where, "part roles must be non-empty and unique")
+                                roles.add(role)
+                                device = part.get("device", {})
+                                if not re.fullmatch(r"[0-9a-f]{32}", str(device.get("deviceUuid", ""))):
+                                    fail(errors, record_where, "part lacks 32-character deviceUuid")
+                                pins = part.get("pins")
+                                if not isinstance(pins, list) or not pins:
+                                    fail(errors, record_where, "part lacks complete pins")
+                                for pin in pins or []:
+                                    states = int("net" in pin) + int(pin.get("connectionState") == "unconnected")
+                                    if states != 1:
+                                        fail(errors, record_where, "each pin needs exactly one net or unconnected state")
+                                    endpoint = f"{role}.{pin.get('number')}"
+                                    if endpoint in pin_nets:
+                                        fail(errors, record_where, f"duplicate physical pin {endpoint}")
+                                    if "net" in pin:
+                                        pin_nets[endpoint] = pin["net"]
+                            declared: dict[str, str] = {}
+                            net_ids: set[str] = set()
+                            for net in record.get("nets", []):
+                                net_id = net.get("id")
+                                if not isinstance(net_id, str) or not net_id or net_id in net_ids:
+                                    fail(errors, record_where, "net ids must be non-empty and unique")
+                                net_ids.add(net_id)
+                                members = net.get("members")
+                                if not isinstance(members, list) or not members:
+                                    fail(errors, record_where, f"net {net_id} has no members")
+                                for endpoint in members or []:
+                                    if endpoint in declared:
+                                        fail(errors, record_where, f"pin {endpoint} appears in multiple nets")
+                                    declared[endpoint] = net_id
+                                    if pin_nets.get(endpoint) != net_id:
+                                        fail(errors, record_where, f"net member {endpoint} disagrees with its pin")
+                            if pin_nets != declared:
+                                fail(errors, record_where, "connected pin set does not exactly match declared nets")
+                    except (OSError, ValueError, json.JSONDecodeError) as exc:
+                        fail(errors, where, f"invalid topologyAsset: {exc}")
+                        topology_cache[topology_asset] = set()
+                if module_id not in topology_cache.get(topology_asset, set()):
+                    fail(errors, where, f"topologyAsset does not contain {module_id}")
     if errors:
         for error in errors:
             print(error, file=sys.stderr)

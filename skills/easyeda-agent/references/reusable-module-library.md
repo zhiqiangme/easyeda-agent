@@ -43,4 +43,16 @@ Block 不是运行时布局层，也没有停用。已有 Block 的公共 Lib �
 5. `python3 scripts/modules-audit.py`；compose 资产另跑 `easyeda sch compose --from ...`。
 6. 真页 Apply 后回读 pin→net/NC、库身份、几何、框和标题，再提升验证状态。
 
+### 从已完成原理图直接提取
+
+优先使用现场 `sch read --no-check` 的制造网表，不再从 PDF 重猜连接；再用 `lib by-lcsc`
+将每个供应商编号解析成 32 位 Device UUID。公开 `*.topology.json` 必须把原位号转换为模块内
+角色、把匿名网改为 `internal.*`、把跨模块网改为 `port.*`，并保留全部物理引脚。只有
+`sch read.floatingPins` 明确列出的脚才能记录为 `connectionState:"unconnected"`；字段缺失不能
+自行推断。不同功能模块分文件提交，不能保留一份能够还原原整板成员关系的 bundle。
+
+现场若无法同时返回 bbox 和完整 pin XY，仍可贡献 `topology_ready`，但不得填写猜测坐标或提升为
+`compose_ready`。以后补测几何时，在单个模块范围重新采集，并以 `sch lib-layout` 和
+`sch compose` 验证。
+
 目录审计只证明公开元数据合同和脱敏字段通过，不证明电气设计、PCB 或硬件正确。
