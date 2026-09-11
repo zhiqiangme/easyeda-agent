@@ -92,6 +92,12 @@ func TestSchMaterializePreservesCanonicalPlacementBindings(t *testing.T) {
 		if step.Action == "schematic.power.connect_pin" && firstConnect < 0 {
 			firstConnect = i
 		}
+		if step.Action == "schematic.power.connect_pin" {
+			kind, _ := step.Payload["kind"].(string)
+			if kind == "netport" {
+				t.Fatal("materialize emitted the planner-only netport alias instead of the typed action enum net_port_bi")
+			}
+		}
 		if step.Action != "schematic.component.place" {
 			continue
 		}

@@ -57,6 +57,9 @@ FOOTPRINT `DOCHEAD` 和唯一 `META.source` 证明实例封装到库资产的出
 | 只画框和标题 | `sch frame apply/check --from frames.json`；字段见 `sch frame --help` 与 [actions.md](actions.md)。 |
 | 执行队列 | `sch apply plan.json`，顺序等待 WebSocket 响应并记录 journal。 |
 
+`sch materialize --with-connectivity` 生成的普通信号端口使用 typed action 枚举
+`net_port_bi`；`netport` 只是部分布局规划器内部的类别别名，不能写入 Apply payload。
+
 `sch plan` 的 NC→连接转换逐脚执行：初始完整连接守卫 → `no_connect off` →
 明确空网/非 NC 的中间守卫 → autoconnect → 目标守卫 → 保存及最终守卫。
 这不删除器件引脚，不清理其他 NC；单独清 NC、同一脚 NC 与连接并存均拒绝。

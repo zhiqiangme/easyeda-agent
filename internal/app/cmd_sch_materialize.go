@@ -118,7 +118,7 @@ func newSchMaterializeCmd(stdout, stderr io.Writer) *cobra.Command {
 								break
 							}
 						}
-						kind := "netport"
+						kind := "net_port_bi"
 						if n := findNet(d, edge.NetID); n != nil {
 							if n.Name == "GND" || n.Name == "AGND" {
 								kind = "ground"
